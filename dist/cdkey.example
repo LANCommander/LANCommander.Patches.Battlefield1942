@@ -1,0 +1,6 @@
+; Rename this file to "cdkey" (no extension) and put it next to BF1942.exe or in
+; %USERPROFILE%\Saved Games\DICE\Battlefield 1942. The first line that is not a comment is the
+; Battlefield 1942 CD key. The expansions use the same key unless they get their own line.
+XXXX-XXXX-XXXX-XXXX-XXXX
+; XPack1=XXXX-XXXX-XXXX-XXXX-XXXX   (The Road to Rome)
+; XPack2=XXXX-XXXX-XXXX-XXXX-XXXX   (Secret Weapons of WWII)
