@@ -27,7 +27,7 @@
 static const char *g_dir;           /* save folder, with trailing backslash */
 static char g_cwd[MAX_PATH];        /* working directory at startup, with trailing backslash */
 static int g_on;
-static int g_log_access;              /* [Saves] LogFiles=1: every redirected path (2: every file) */
+static int g_log_access;              /* bf1942patch.logFiles 1: every redirected path (2: every file) */
 static CRITICAL_SECTION g_cs;
 
 /* ---------------------------------------------------------------- path mapping */
@@ -445,7 +445,7 @@ void bf_saves_install(void)
         return;
     }
     InitializeCriticalSection(&g_cs);
-    g_log_access = bf_ini_int("Saves", "LogFiles", 0);
+    bf_setting_bind("logFiles", &g_log_access);
     GetCurrentDirectoryA(MAX_PATH - 1, g_cwd);
     n = strlen(g_cwd);
     if (n && g_cwd[n - 1] != '\\') {

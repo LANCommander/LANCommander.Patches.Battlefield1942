@@ -1,6 +1,6 @@
 /* ASI plugin build (bf1942patch.asi), for an ASI loader such as Ultimate ASI Loader: the loader LoadLibrary()s
  * every .asi it finds (game folder, scripts\, plugins\) before BF1942.exe runs its own code, and DllMain applies
- * the same patches as the dinput8.dll proxy. Settings come from bf1942patch.ini next to the .asi, the log goes to
+ * the same patches as the dinput8.dll proxy. The options come from bf1942patch.con next to the .asi, the log goes to
  * bf1942patch.log there.
  *
  * Without the proxy the game's DirectInput object is not wrapped at creation, so the gamepad module hooks

@@ -1,9 +1,9 @@
 /* The install folder and the user's save folder.
  *
  * Save folder: <Saved Games>\DICE\Battlefield 1942 (SHGetKnownFolderPath(FOLDERID_SavedGames), which is
- * %USERPROFILE%\Saved Games unless the user moved it). [Saves] Folder= overrides it; [Saves] Redirect=0 turns
- * the redirection off (bf_save_dir() is then ""). The [Saves] settings come from bf1942patch.ini only: Settings.ini
- * (bf1942patch.c), which can override every other setting, lives in the folder they choose. */
+ * %USERPROFILE%\Saved Games unless the user moved it). bf1942patch.saveFolder overrides it; redirectSaves 0 turns
+ * the redirection off (bf_save_dir() is then ""). Both come from the install's bf1942patch.con only: the player's
+ * bf1942patch.con (settings_game.c), which can override every other option, lives in the folder they choose. */
 #include <stdio.h>
 #include <string.h>
 #include <shlobj.h>
@@ -87,11 +87,10 @@ static int saved_games_folder(char *out)
 static void find_save_dir(void)
 {
     char folder[MAX_PATH], ovr[MAX_PATH];
-    if (!bf_ini_int("Saves", "Redirect", 1)) {
+    if (!bf_setting_int("redirectSaves")) {
         return;
     }
-    ovr[0] = '\0';
-    bf_ini_str("Saves", "Folder", ovr, sizeof ovr);
+    lstrcpynA(ovr, bf_setting_str("saveFolder"), sizeof ovr);
     if (ovr[0]) {
         char exp[MAX_PATH];
         DWORD n = ExpandEnvironmentStringsA(ovr, exp, sizeof exp);

@@ -1,21 +1,22 @@
-/* [FrameRate]: no 60 / 100 fps cap, and a HUD that keeps time at any frame rate (re/fps_notes.md).
+/* bf1942patch.unlockFps: no 60 / 100 fps cap, and a HUD that keeps time at any frame rate (re/fps_notes.md).
  *
  * The cap is game.lockFps (app+0x17c, app = [0x971eac]): the main loop step 0x44abc0 busy-waits until 1 / lockFps
  * has passed since the last frame, and the render function 0x466d80 sets lockFps to 60.0 (vsync on) or 100.0 (off)
  * whenever renderer getVSyncEnabled changes, so a console "game.lockFps" does not stay; the menus run at the 100.0
- * the app constructor sets (0x4569cb). Unlock=1 puts MaxFps into all three immediates (not into the dedicated
+ * the app constructor sets (0x4569cb). unlockFps 1 puts maxFps into all three immediates (not into the dedicated
  * server's 2 x tick rate at 0x455e19), and the wait sleeps instead of spinning (the call to the timer 0x581960 inside the
  * loop goes through frame_wait). lockFps 0 means no limit; in the original it is 1/0 and the loop never ends.
  *
  * The HUD: BFMenu::paint 0x45d7c0 runs once per rendered frame and updates the meme System (every timeout, fade
  * and animation of the HUD and the menus) by app+0x184, which is the 30 Hz tick (1/30 s), not the frame time. So
  * the HUD runs twice as fast as real time at 60 fps, which is what its timeouts were tuned for, and 2.4 times as
- * fast as that at 144 fps (the weapon bar is gone after 0.6 s instead of 1.5 s). FixHud=1 gives it the time
+ * fast as that at 144 fps (the weapon bar is gone after 0.6 s instead of 1.5 s). realTimeHud 1 gives it the time
  * that really passed, scaled to look as it does at 60 fps.
  *
- * The Video options page gets a MAX FPS row (MaxFpsOption=1): menu/VideoMenu is spliced as it is opened
+ * The Video options page gets a MAX FPS row (maxFpsOption 1): menu/VideoMenu is spliced as it is opened
  * (bf_menu_add_row), the row's int is bound by VideoOptions::registerVariables (0x6b02f0), and SaveVideoOptions
- * (0x6b11a0, on Apply / Back) applies it and keeps it in Settings.ini. */
+ * (0x6b11a0, on Apply / Back) applies it and keeps it in the player's bf1942patch.con. The
+ * console's bf1942patch.maxFps applies at once too. */
 #include <string.h>
 #include "bf1942patch.h"
 #include "d3d.h"
@@ -122,7 +123,7 @@ __asm__(".text\n"
         "    ret\n");
 void bf_hud_dt_stub(void);
 
-/* ---------------------------------------------------------------- [Debug] LogFps */
+/* ---------------------------------------------------------------- bf1942patch.logFps */
 
 static void count_frame(void *device, int after)
 {
@@ -150,8 +151,8 @@ static void count_frame(void *device, int after)
 
 /* ---------------------------------------------------------------- the limit, and the Video page row */
 
-static int g_max_fps;            /* MaxFps; also the menu variable Options/Video/MaxFps */
-static int g_saved_fps;          /* what Settings.ini / bf1942patch.ini holds */
+static int g_max_fps;            /* bf1942patch.maxFps; also the menu variable Options/Video/MaxFps */
+static int g_saved_fps;          /* what the player's bf1942patch.con holds */
 
 static int clamp_fps(int fps)
 {
@@ -183,7 +184,7 @@ static int __attribute__((thiscall)) hk_video_vars(void *page)
 
 static void (__attribute__((thiscall)) *g_video_save)(void *page);
 
-/* the Video page is saved: the slider's value becomes the limit, kept in Settings.ini */
+/* the Video page is saved: the slider's value becomes the limit, kept in the player's bf1942patch.con */
 static void __attribute__((thiscall)) hk_video_save(void *page)
 {
     g_video_save(page);
@@ -191,7 +192,7 @@ static void __attribute__((thiscall)) hk_video_save(void *page)
     apply_max_fps();
     if (g_max_fps != g_saved_fps) {
         g_saved_fps = g_max_fps;
-        bf_ini_set_int("FrameRate", "MaxFps", g_max_fps);
+        bf_setting_keep_int("maxFps", g_max_fps);
         bf_log("framerate: MaxFps %d from the Video options", g_max_fps);
     }
 }
@@ -237,18 +238,28 @@ static void video_option_install(void)
     g_video_save = (void (__attribute__((thiscall)) *)(void *))bf_detour(VIDEO_SAVE, save_head, sizeof save_head, hk_video_save);
 }
 
+/* bf1942patch.maxFps <fps> in the console */
+static void max_fps_changed(void)
+{
+    g_max_fps = g_saved_fps = clamp_fps(g_max_fps);
+    apply_max_fps();
+    bf_log("framerate: at most %d fps (0 = no limit)", g_max_fps);
+}
+
 /* ---------------------------------------------------------------- install */
 
 void bf_framerate_install(void)
 {
-    if (bf_ini_int("FrameRate", "Unlock", 1)) {
+    if (bf_setting_int("unlockFps")) {
         static const BYTE fps60[4] = {0x00, 0x00, 0x70, 0x42}, fps100[4] = {0x00, 0x00, 0xc8, 0x42};
-        g_max_fps = g_saved_fps = clamp_fps(bf_ini_int("FrameRate", "MaxFps", 0));
+        bf_setting_bind("maxFps", &g_max_fps);
+        g_max_fps = g_saved_fps = clamp_fps(g_max_fps);
         if (!bf_expect(CAP_VSYNC, fps60, 4) || !bf_expect(CAP_NOVSYNC, fps100, 4) || !bf_expect(CAP_INIT, fps100, 4)) {
             bf_log("framerate: the 60 / 100 fps caps at %08x / %08x / %08x differ, left alone", CAP_VSYNC, CAP_NOVSYNC,
                    CAP_INIT);
         } else if (bf_redirect_call(WAIT_CALL, GAME_NOW, bf_frame_wait_stub)) {
             apply_max_fps();
+            bf_setting_watch("maxFps", max_fps_changed);
             g_timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
             if (!g_timer) {
                 timeBeginPeriod(1);
@@ -258,12 +269,12 @@ void bf_framerate_install(void)
             } else {
                 bf_log("framerate: no limit");
             }
-            if (bf_ini_int("FrameRate", "MaxFpsOption", 1)) {
+            if (bf_setting_int("maxFpsOption")) {
                 video_option_install();
             }
         }
     }
-    if (bf_ini_int("FrameRate", "FixHud", 1)) {
+    if (bf_setting_int("realTimeHud")) {
         static const BYTE orig[6] = {0x8b, 0x92, 0x84, 0x01, 0x00, 0x00};
         if (bf_replace_call(HUD_DT_SITE, orig, sizeof orig, bf_hud_dt_stub)) {
             bf_log("framerate: HUD timing follows real time");
@@ -271,7 +282,7 @@ void bf_framerate_install(void)
             bf_log("framerate: HUD timing site %08x differs, left alone", HUD_DT_SITE);
         }
     }
-    if (bf_ini_int("Debug", "LogFps", 0)) {
+    if (bf_setting_int("logFps")) {
         bf_d3d_install();
         bf_d3d_on_present(count_frame);
     }

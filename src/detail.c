@@ -1,4 +1,4 @@
-/* [Detail]: the level of detail of meshes, trees and terrain pushed out for today's machines (re/detail_notes.md).
+/* bf1942patch.meshLod / treeLod / terrainLod / terrainDetail: the level of detail of meshes, trees and terrain pushed out for today's machines (re/detail_notes.md).
  *
  * Only what decides how finely the things inside the view are drawn changes. The view distance and the fog
  * (game.setViewDistance, renderer.fogStart / fogEnd), the distance at which small objects are culled and every
@@ -40,9 +40,9 @@ typedef void *(__attribute__((thiscall)) *exec_fn)(void *cmd);   /* console comm
 
 static float g_mesh = 1, g_billboard = 1, g_terrain_lod = 1, g_terrain_tris = 1;
 
-static float percent(const char *key, int def)
+static float percent(const char *name)
 {
-    int p = bf_ini_int("Detail", key, def);
+    int p = bf_setting_int(name);
     return (p < 100 ? 100 : p > 1000 ? 1000 : p) / 100.0f;
 }
 
@@ -147,10 +147,10 @@ static int mesh_install(void)
 
 void bf_detail_install(void)
 {
-    g_mesh = percent("MeshLod", 300);
-    g_billboard = percent("TreeLod", 300);
-    g_terrain_lod = percent("TerrainLod", 300);
-    g_terrain_tris = percent("TerrainDetail", 400);
+    g_mesh = percent("meshLod");
+    g_billboard = percent("treeLod");
+    g_terrain_lod = percent("terrainLod");
+    g_terrain_tris = percent("terrainDetail");
     if (g_mesh > 1) {
         if (mesh_install()) {
             bf_log("detail: mesh LOD distances x%.2f", g_mesh);

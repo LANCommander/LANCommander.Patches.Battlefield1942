@@ -1,0 +1,221 @@
+rem bf1942patch for Battlefield 1942 1.61 (BF1942.exe). Install: copy dinput8.dll, this file and the bf1942patch
+rem folder next to BF1942.exe. The log goes to bf1942patch.log next to this file.
+rem
+rem Every option is a console variable: bf1942patch.<option> <value>. The patch reads this file as it loads, before
+rem the game starts. In the game, the console reads an option (bf1942patch.maxFps) and sets it (bf1942patch.maxFps
+rem 144), and so can any .con file the game runs. Options set in the game (the console, the game's .con files and
+rem the options the patch adds to the game's menus) are kept in the player's bf1942patch.con in the save folder (see
+rem redirectSaves; created on the first start), which wins over this file. Most take effect when the game next starts,
+rem which it does for every map; the console says so. Those that apply at once: hudScale, maxFps, the gamepad's dead
+rem zone, sensitivity and keys, the voice keys, volumes, activation and microphone, logFiles, logRegistry and logHud.
+rem
+rem 1 = on, 0 = off (true / false, on / off and yes / no work too). Text with spaces goes in quotes: "like this".
+rem Every option is on by default; set one to 0 to get the original behaviour back.
+
+rem ---------------------------------------------------------------- general
+rem 0 = load, but patch nothing
+bf1942patch.enabled 1
+
+rem ---------------------------------------------------------------- saves
+rem profiles (options, controls, server lists), the current profile, campaign progress, the server set-up and the
+rem screenshots in %USERPROFILE%\Saved Games\DICE\Battlefield 1942 instead of the install folder (for every mod:
+rem Mods\<mod>\Settings, Mods\<mod>\save). Existing profiles and saves are copied over the first time a mod is used;
+rem files only the install has (the shipped defaults) are still read from there. This and saveFolder are only read
+rem from this file: they decide where the player's bf1942patch.con is
+bf1942patch.redirectSaves 1
+rem use this folder instead (environment variables allowed, e.g. "%APPDATA%\BF1942"); "" = Saved Games
+bf1942patch.saveFolder ""
+rem log every file path the patch redirects (1), or every file the game opens (2) (troubleshooting)
+bf1942patch.logFiles 0
+
+rem ---------------------------------------------------------------- registry, CD keys
+rem the game never reads or writes the registry: the CD keys come from cdKey or a cdkey file, everything else the game
+rem keeps there is answered in memory. The game runs from any folder without an installer
+bf1942patch.noRegistry 1
+rem log every registry access of the game (troubleshooting)
+bf1942patch.logRegistry 0
+rem the CD keys. "" = a file named cdkey (or cdkey.txt) in the save folder or next to BF1942.exe: the key on its first
+rem line, and optional lines XPack1=<key> / XPack2=<key> for the expansions (see bf1942patch\cdkey.example). An
+rem expansion without a key of its own uses the Battlefield 1942 key
+bf1942patch.cdKey ""
+rem The Road to Rome
+bf1942patch.cdKeyXPack1 ""
+rem Secret Weapons of WWII
+bf1942patch.cdKeyXPack2 ""
+rem the install language the game is told (English, German, French, Spanish, Italian, ...); "" = English
+bf1942patch.language ""
+
+rem ---------------------------------------------------------------- network
+rem the server list and server reporting through OpenSpy (GameSpy is gone): every GameSpy host name goes to its
+rem openspy.net twin, and the master server names (master.gamespy.com, master.bf1942.sk, master.bf1942.org) to
+rem masterServer
+bf1942patch.openSpy 1
+rem the master server; "" = master.openspy.net
+bf1942patch.masterServer ""
+
+rem ---------------------------------------------------------------- display
+rem a borderless window that covers the monitor instead of exclusive full screen: the desktop resolution never changes
+rem (not even when the game restarts itself for every map, see seamlessRestart) and alt-tab is instant. Pick the
+rem monitor's own resolution in the video options for a sharp picture; any other is scaled to fit
+bf1942patch.borderless 1
+rem the monitor to use (1, 2, ...; 0 = the main one)
+bf1942patch.monitor 0
+rem wait for the monitor's refresh (no tearing; the desktop compositor usually prevents it already)
+bf1942patch.vsync 0
+rem the game sees the monitor's real pixels on a display scaled to more than 100% (no blurry, oversized window)
+bf1942patch.dpiAware 1
+rem when the profile's video mode is not available (another monitor, another refresh rate) use the same size at any
+rem refresh rate, else the desktop's size, else 800x600, instead of stopping with "Invalid videomode specified"
+bf1942patch.modeFallback 1
+rem with borderless: the menus (which the game always runs at 800x600) at the monitor's resolution, sharp and at their
+rem own shape, instead of a blurry 800x600 picture stretched to the monitor. The game is also told it runs full
+rem screen, so it uses the resolution of the video options (game.setGameDisplayMode) instead of 800x600
+bf1942patch.nativeMenus 1
+
+rem ---------------------------------------------------------------- frame rate
+rem no 60 fps cap (100 with vsync off): the game runs at up to maxFps. game.lockFps <fps> in the console still works,
+rem and game.lockFps 0 means no limit. A capped game sleeps while it waits instead of keeping a core busy
+bf1942patch.unlockFps 1
+rem frames per second at most with unlockFps (30-1000); 0 = no limit (vsync 1 limits it to the monitor's refresh
+rem rate). The game's Options - Video page gets a MAX FPS row for it (0-300)
+bf1942patch.maxFps 0
+rem 0 = no MAX FPS row on the Video page (the limit is then only maxFps)
+bf1942patch.maxFpsOption 1
+rem the HUD and menu timers and fades in real time: the weapon bar, kill and chat messages stay up as long as they do
+rem at 60 fps at any frame rate, instead of vanishing early above 60 fps
+bf1942patch.realTimeHud 1
+
+rem ---------------------------------------------------------------- restarts
+rem the game starts a new copy of itself for every map, for hosting, joining and going back to the menu. With this the
+rem screen keeps showing the loading picture from the old copy to the new one (no desktop, no black flicker, no display
+rem mode changes, no BlackScreen.exe) and the new copy gets the keyboard and mouse straight away
+bf1942patch.seamlessRestart 1
+
+rem ---------------------------------------------------------------- widescreen, HUD
+rem the 3-D view at the screen's own shape: the vertical view stays as at 4:3 and wide screens see more at the sides
+rem (Hor+). Also fixes the culling that cut off terrain patches at the edges of wide screens. Drop old
+rem "renderer.fieldOfView 1.33" lines from Video.con: they were a work-around for the stretched picture
+bf1942patch.horPlus 1
+rem the HUD and the menus at their own shape instead of stretched to the screen (menus and the loading screen stay
+rem centred, with black bars beside them)
+bf1942patch.widescreenHud 1
+rem while playing, every HUD element sits at the screen edge it belongs to (minimap and kill messages right, chat left,
+rem ...) instead of crowding the middle 4:3 part of a wide screen
+bf1942patch.anchorHud 1
+rem HUD size in percent (50-200). The game's Options - General page gets a HUD SCALE slider for it, saved with the
+rem profile (its GeneralOptions.con runs bf1942patch.hudScale); this is the value for profiles that have none
+bf1942patch.hudScale 100
+rem 0 = no HUD SCALE slider (the HUD scale is then only hudScale)
+bf1942patch.hudScaleOption 1
+
+rem ---------------------------------------------------------------- detail
+rem how far out things inside the view keep their full detail, in percent of what the game and the map set (100-1000;
+rem 100 = as the original). The view distance, the fog and the distance at which objects disappear are never changed:
+rem they stay as the map / the server set them, so nobody sees farther than with the original game.
+rem meshes (buildings, vehicles, soldiers, props) switch to their coarser versions this much farther away
+bf1942patch.meshLod 300
+rem trees turn into flat billboards this much farther away (50 m in the original objects)
+bf1942patch.treeLod 300
+rem the terrain drops to its coarser levels this much farther away (GeometryTemplate.lodDistance of the map)
+bf1942patch.terrainLod 300
+rem the terrain's triangle budget (GeometryTemplate.targetTriCount of the map, 4000-5000 in the original maps; at most
+rem 200000 triangles): finer hills and slopes
+bf1942patch.terrainDetail 400
+
+rem ---------------------------------------------------------------- gamepads
+rem modern gamepads (Xbox, PlayStation, Switch Pro, ...) through SDL 2, offered to the game as its first joysticks:
+rem IDAxis_0/1 left stick, IDAxis_2/3 right stick, IDAxis_4/5 LT/RT; buttons 0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 Back,
+rem 7 Start, 8/9 stick clicks, 10/11 LT/RT, 12-15 D-pad up/down/left/right
+bf1942patch.gamepad 1
+rem stick dead zone, percent (the game has none of its own)
+bf1942patch.gamepadDeadzone 15
+rem stick response: 100 = linear, 50 = squared (finer aim near the centre), 0 = cubed
+bf1942patch.gamepadSensitivity 100
+rem run Settings\Gamepad.con (in the save folder; written with defaults the first time) after the profile's controls:
+rem move / look / fire / jump ... for infantry, land and sea vehicles, aircraft and the menu, next to the keyboard and
+rem mouse bindings. The Controls menu would drop these when it saves, so they live in their own file
+bf1942patch.gamepadBindings 1
+rem hide a gamepad's own DirectInput entry, so it is not listed twice
+bf1942patch.gamepadHideDuplicates 1
+rem keyboard keys (DirectInput key codes) Start / Back also press, e.g. 1 = Escape, 15 = Tab; 0 = none
+bf1942patch.gamepadStartKey 0
+bf1942patch.gamepadBackKey 0
+
+rem ---------------------------------------------------------------- voice chat
+rem voice chat with the other players through the LANCommander Interposer: needs the Interposer in the game (the
+rem Interposer plugin build runs in it) or bf1942patch\LANCommander.Interposer.dll, and a game server that runs this
+rem patch (it hosts the voice server). The voice server is found from the game server the game joins; players hear the
+rem players near them and, on the radio, their own team
+bf1942patch.voiceChat 1
+rem the voice server's port (UDP), used when the game server does not say which it is
+bf1942patch.voicePort 27800
+rem the voice server's password, if it has one
+bf1942patch.voicePassword ""
+rem the voice server's host (then voicePort is used as it is); "" = the game server's
+bf1942patch.voiceServer ""
+rem the game server's query ports, asked for its voice port (LAN, internet)
+bf1942patch.voiceQueryPorts "22000,23000"
+rem 1 = talk to the players nearby whenever the microphone hears speech, without holding a key (voice activation);
+rem 0 = push to talk with proximityKey. Also a check box in Options - Controls - Common
+bf1942patch.voiceActivation 0
+rem the same for the team radio
+bf1942patch.radioActivation 0
+rem the push-to-talk keys, as the game names them (Options - Controls - Common gets rows for both): IDKey_A..IDKey_Z,
+rem IDKey_0..IDKey_9, IDKey_F1..IDKey_F12, IDKey_Capital, IDKey_LeftAlt, IDKey_Tab, IDKey_Space, IDKey_Numpad0, ...,
+rem Mouse_IDButton_0..Mouse_IDButton_4 (the mouse buttons from the left one); none = no key
+bf1942patch.proximityKey IDKey_Capital
+bf1942patch.radioKey Mouse_IDButton_3
+rem the volume of the other players and the microphone's sensitivity, in percent (0-200). Options - Sound (page 2)
+rem gets a slider for each
+bf1942patch.voiceVolume 100
+bf1942patch.micSensitivity 100
+rem the microphone, by its device id (the log names it when it is picked); "" = the system's default. Options - Sound
+rem (page 1) gets a MICROPHONE row to pick it, in place of DISABLE ALL SOUND (click to step through them)
+bf1942patch.inputDevice ""
+rem who is talking, under the minimap while playing: you (while your voice is sent) and every player you hear, in their
+rem team's chat colour, with a radio icon for the team radio or a megaphone icon for nearby
+bf1942patch.voiceHud 1
+rem 0 = no rows in the Controls and Sound options (the keys, volumes and microphone are then only the options above,
+rem and DISABLE ALL SOUND stays)
+bf1942patch.voiceOptions 1
+rem a MUTE VOICE button on the scoreboard, in place of DROP BUDDY (ADD BUDDY and DROP BUDDY become one button that
+rem follows the player picked): pick a player in the list and click it to stop (or start again) hearing them. Mutes
+rem are kept by player name with the profile, as the buddies are (Settings\Profiles\<profile>\VoiceMuteList.con; also
+rem bf1942patch.voiceMute / voiceUnmute "<name>" in the console); 0 = no button, and the game's own buddy buttons (the
+rem saved mutes still apply)
+bf1942patch.voiceMuteButton 1
+rem the voice library when no LANCommander Interposer is in the game already; "" =
+rem bf1942patch\LANCommander.Interposer.dll (relative to BF1942.exe)
+bf1942patch.voiceLibrary ""
+
+rem ---------------------------------------------------------------- dedicated server
+rem The dedicated server (BF1942_w32ded.exe, or bf1942_lnxded with libbf1942patch.so) hosts the voice server: voiceChat,
+rem voicePort (the port it listens on, UDP), voicePassword and voiceLibrary above apply to it too, and these. The
+rem server reads them from this file only (it has no player's file and no console commands for them); on Linux each
+rem can also be set with an environment variable BF1942PATCH_<OPTION>, e.g. BF1942PATCH_VOICEPORT=27800.
+rem the address to listen on; "" = every interface
+bf1942patch.voiceBindAddress ""
+rem enables the voice server's remote admin (LANCommander, comms_admin); "" = none
+bf1942patch.voiceAdminKey ""
+rem the most players in voice, and the most bits per second a player's voice is sent with
+bf1942patch.voiceMaxPlayers 256
+bf1942patch.voiceMaxBitrate 32000
+rem how far nearby voice carries, in metres: heard at full volume within proximityFullVolumeRange, not at all beyond
+rem proximityRange
+bf1942patch.proximityRange 50
+bf1942patch.proximityFullVolumeRange 4
+rem 1 = the bots are voice players too (testing)
+bf1942patch.voiceIncludeBots 0
+rem the dedicated server's error dialogs are written to the log and answered OK, so an unattended server exits instead
+rem of waiting for a click forever
+bf1942patch.suppressDialogs 1
+rem Linux server: 1 = the log (bf1942patch.log next to the server) goes to the console too
+bf1942patch.logToStderr 0
+
+rem ---------------------------------------------------------------- troubleshooting
+rem log crashes with registers and a call chain to bf1942patch.log
+bf1942patch.crashLog 0
+rem log every HUD box and the screen edge it is anchored to (troubleshooting anchorHud)
+bf1942patch.logHud 0
+rem log the frame rate every 5 seconds (troubleshooting unlockFps)
+bf1942patch.logFps 0

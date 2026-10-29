@@ -1,4 +1,4 @@
-/* [Debug] CrashLog=1: a crash (access violation and the like) is written to bf1942patch.log with the registers and
+/* bf1942patch.crashLog 1: a crash (access violation and the like) is written to bf1942patch.log with the registers and
  * a call chain: the stack is scanned for addresses that follow a call instruction in a loaded module. The
  * game's own handler (errorlog.txt) still runs afterwards. */
 #include <stdio.h>
@@ -109,7 +109,7 @@ void bf_crashlog_install(void)
     if (!real_MessageBoxA) {
         real_MessageBoxA = MessageBoxA;
     }
-    if (bf_ini_int("Debug", "CrashLog", 0)) {
+    if (bf_setting_int("crashLog")) {
         AddVectoredExceptionHandler(1, on_exception);
         real_exit = bf_hook_import("MSVCR70.dll", "exit", hk_exit);
         real_ExitProcess = bf_hook_import("KERNEL32.dll", "ExitProcess", hk_ExitProcess);

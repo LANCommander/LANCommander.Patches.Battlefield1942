@@ -1,19 +1,22 @@
-/* [Voice]: voice chat with the other players on the server, through LANCommander Comms.
+/* bf1942patch.voiceChat: voice chat with the other players on the server, through the LANCommander Interposer's voice API.
  *
- * The voice library (LANCommander.Comms.dll, x86, from LANCommander.Voice) is loaded from the bf1942patch folder
- * next to BF1942.exe; without it the game is left as it is. The game server runs the LANCommander Comms server
- * plugin, which mirrors its players, teams and positions into a voice server and advertises that server's port in
- * its query replies (voice_net.c). This client:
+ * The voice library is the Interposer (LANCommander.Interposer.dll, x86), whose interposer_comms_* exports are the
+ * former LANCommander Comms. A copy already in the process is used (the one that loaded the Interposer plugin build,
+ * or one LANCommander deployed); else it is loaded from the bf1942patch folder next to BF1942.exe, on the first
+ * step of the main loop rather than from a DllMain. Without it the game is left as it is. The game server runs the
+ * LANCommander Comms server plugin, which mirrors its players, teams and positions into a voice server and
+ * advertises that server's port in its query replies (voice_net.c). This client:
  * - finds the server the game plays on and connects to its voice server as the local player (the server knows
  *   the game's players and only lets each be claimed by its own name / id: the bridge's ids are engine id + 1);
  * - talks to the players nearby while the proximity key is held (or always while the microphone hears speech,
- *   with VoiceActivation=1), and on the team radio while the radio key is held: the server shows each player
+ *   with bf1942patch.voiceActivation 1), and on the team radio while the radio key is held: the server shows each player
  *   their own team's group only, which becomes the radio's target;
  * - keeps what the HUD shows up to date (voice_hud.c), and applies the keys and volumes of the menus
- *   (voice_menu.c).
+ *   (voice_menu.c);
+ * - mutes the players muted from the scoreboard (voice_scoreboard.c), by name, whenever they are in voice.
  * Everything runs on the game thread, after each step of the main loop (0x44abc0, detoured; before each Present if
- * another plugin hooked it first). The voice client of the LANCommander Comms Interposer plugin stands down while
- * this one runs (the mutex Local\bf1942patch_voice_<pid>). The local player:
+ * another plugin hooked it first). The voice client of LANCommander.Voice's BF1942 Interposer plugin stands down
+ * while this one runs (the mutex Local\bf1942patch_voice_<pid>). The local player:
  * IPlayerManager [0x97d76c], vtable +0x18 player by id, +0x20 local player; IPlayer vtable +0x18 name (std::string *),
  * +0x44 id, field +0xac team. */
 #include <winsock2.h>
@@ -22,7 +25,7 @@
 #include <string.h>
 #include "voice.h"
 #include "d3d.h"
-#include "comms/client.h"
+#include "interposer/LANCommander.Interposer.Comms.Client.h"
 
 #define FRAME_FN        0x44abc0u    /* the main loop step: thiscall(app) -> keep running */
 #define PLAYER_MANAGER  0x97d76cu
@@ -30,6 +33,7 @@
 #define PM_LOCAL        0x20
 #define PLAYER_NAME     0x18
 #define PLAYER_ID       0x44
+#define PLAYER_IS_AI    0x58         /* bool: the scoreboard's votes leave these players alone (0x6dfcb0) */
 #define PLAYER_TEAM     0xac         /* int: 1 Axis, 2 Allies */
 
 #define UPDATE_MS       100
@@ -42,97 +46,171 @@
 
 /* ---------------------------------------------------------------- the library */
 
+/* the Interposer's voice exports: p_comms_<name> is interposer_comms_<name> */
 #define COMMS_FUNCTIONS(X) \
     X(uint32_t, comms_get_api_version, (void)) \
     X(const char *, comms_get_version_string, (void)) \
-    X(const char *, comms_result_to_string, (comms_result)) \
-    X(void, comms_set_log_handler, (comms_log_fn, comms_log_level, void *)) \
-    X(void, comms_client_config_init, (comms_client_config *)) \
-    X(comms_result, comms_client_create, (const comms_client_config *, comms_client **)) \
-    X(void, comms_connect_info_init, (comms_connect_info *)) \
-    X(comms_result, comms_client_connect, (comms_client *, const comms_connect_info *)) \
-    X(comms_result, comms_client_disconnect, (comms_client *)) \
-    X(comms_connection_state, comms_client_get_state, (comms_client *)) \
-    X(comms_result, comms_client_poll_event, (comms_client *, comms_client_event *)) \
-    X(comms_result, comms_client_set_talk_targets, (comms_client *, const comms_talk_target *, uint32_t)) \
-    X(comms_result, comms_client_set_ptt_targets, (comms_client *, uint32_t, const comms_talk_target *, uint32_t)) \
-    X(comms_result, comms_client_set_push_to_talk, (comms_client *, uint32_t, int)) \
-    X(comms_result, comms_client_get_group_info, (comms_client *, comms_group_id, comms_client_group_info *)) \
-    X(comms_result, comms_client_get_player_info, (comms_client *, comms_player_id, comms_client_player_info *)) \
-    X(comms_result, comms_client_get_active_speakers, (comms_client *, comms_speaker_info *, uint32_t, uint32_t *)) \
-    X(comms_result, comms_client_get_transmit_state, (comms_client *, comms_transmit_state *)) \
-    X(comms_result, comms_client_set_input_gain, (comms_client *, float)) \
-    X(comms_result, comms_client_set_master_volume, (comms_client *, float)) \
-    X(comms_result, comms_client_set_transmit_mode, (comms_client *, comms_transmit_mode))
+    X(const char *, comms_result_to_string, (interposer_comms_result)) \
+    X(void, comms_set_log_handler, (interposer_comms_log_fn, interposer_comms_log_level, void *)) \
+    X(void, comms_client_config_init, (interposer_comms_client_config *)) \
+    X(interposer_comms_result, comms_client_create, \
+      (const interposer_comms_client_config *, interposer_comms_client **)) \
+    X(void, comms_connect_info_init, (interposer_comms_connect_info *)) \
+    X(interposer_comms_result, comms_client_connect, \
+      (interposer_comms_client *, const interposer_comms_connect_info *)) \
+    X(interposer_comms_result, comms_client_disconnect, (interposer_comms_client *)) \
+    X(interposer_comms_connection_state, comms_client_get_state, (interposer_comms_client *)) \
+    X(interposer_comms_result, comms_client_poll_event, (interposer_comms_client *, interposer_comms_client_event *)) \
+    X(interposer_comms_result, comms_client_set_talk_targets, \
+      (interposer_comms_client *, const interposer_comms_talk_target *, uint32_t)) \
+    X(interposer_comms_result, comms_client_set_ptt_targets, \
+      (interposer_comms_client *, uint32_t, const interposer_comms_talk_target *, uint32_t)) \
+    X(interposer_comms_result, comms_client_set_push_to_talk, (interposer_comms_client *, uint32_t, int)) \
+    X(interposer_comms_result, comms_client_get_group_info, \
+      (interposer_comms_client *, interposer_comms_group_id, interposer_comms_client_group_info *)) \
+    X(interposer_comms_result, comms_client_get_player_info, \
+      (interposer_comms_client *, interposer_comms_player_id, interposer_comms_client_player_info *)) \
+    X(interposer_comms_result, comms_client_list_players, \
+      (interposer_comms_client *, interposer_comms_player_id *, uint32_t, uint32_t *)) \
+    X(interposer_comms_result, comms_client_set_player_muted, \
+      (interposer_comms_client *, interposer_comms_player_id, int)) \
+    X(interposer_comms_result, comms_client_get_active_speakers, \
+      (interposer_comms_client *, interposer_comms_speaker_info *, uint32_t, uint32_t *)) \
+    X(interposer_comms_result, comms_client_get_transmit_state, \
+      (interposer_comms_client *, interposer_comms_transmit_state *)) \
+    X(interposer_comms_result, comms_client_set_input_gain, (interposer_comms_client *, float)) \
+    X(interposer_comms_result, comms_client_set_master_volume, (interposer_comms_client *, float)) \
+    X(interposer_comms_result, comms_client_set_transmit_mode, \
+      (interposer_comms_client *, interposer_comms_transmit_mode)) \
+    X(interposer_comms_result, comms_list_audio_devices, \
+      (interposer_comms_device_type, interposer_comms_audio_device *, uint32_t, uint32_t *)) \
+    X(interposer_comms_result, comms_client_set_capture_device, (interposer_comms_client *, const char *))
 
-#define DECLARE(ret, name, args) static ret (COMMS_CALL *p_##name) args;
+#define DECLARE(ret, name, args) static ret (INTERPOSER_CALL *p_##name) args;
 COMMS_FUNCTIONS(DECLARE)
 
+static HMODULE g_interposer;          /* the Interposer that loaded the plugin build */
 static HMODULE g_dll;
+static char g_dll_path[MAX_PATH];
+
+void bf_voice_set_interposer(HMODULE interposer)
+{
+    g_interposer = interposer;
+}
 
 static int resolve(void)
 {
 #define RESOLVE(ret, name, args) \
-    if (!(p_##name = (ret (COMMS_CALL *) args)(void (*)(void))GetProcAddress(g_dll, #name))) { \
-        bf_log("voice: %s is missing from the voice library", #name); \
+    if (!(p_##name = (ret (INTERPOSER_CALL *) args)(void (*)(void))GetProcAddress(g_dll, "interposer_" #name))) { \
+        bf_log("voice: interposer_%s is missing from %s", #name, g_dll_path); \
         return 0; \
     }
     COMMS_FUNCTIONS(RESOLVE)
     return 1;
 }
 
-/* [Voice] VoiceLibrary (relative to the game folder), else bf1942patch\LANCommander.Comms.dll, else next to this
- * DLL or BF1942.exe */
-static int load_library(void)
+/* an Interposer already in the process: the one that loaded the plugin build, else one deployed under any of the
+ * names it ships as (the patch's own dinput8.dll exports neither). *old: one without voice chat */
+static HMODULE loaded_interposer(int *old)
 {
-    char custom[MAX_PATH], path[MAX_PATH * 2], self[MAX_PATH], *slash;
+    static const char *const names[] = {"LANCommander.Interposer.dll", "version.dll", "dinput8.dll", "dinput.dll",
+                                        "LANCommander.Interposer.asi"};
+    HMODULE m;
+    size_t i;
+    *old = 0;
+    for (i = 0; i <= sizeof names / sizeof names[0]; i++) {
+        m = i ? GetModuleHandleA(names[i - 1]) : g_interposer;
+        if (m && GetProcAddress(m, "interposer_comms_get_api_version")) {
+            return m;
+        }
+        *old |= m && GetProcAddress(m, "InterposerLog");
+    }
+    return NULL;
+}
+
+/* at install: the Interposer in the process, else the file to load on the first step of the main loop:
+ * bf1942patch.voiceLibrary (relative to the game folder), else bf1942patch\LANCommander.Interposer.dll, else next to this DLL or
+ * BF1942.exe */
+static int find_library(void)
+{
+    char custom[MAX_PATH], self[MAX_PATH], *slash;
     const char *tries[4];
-    int n = 0, i;
-    if (bf_ini_str("Voice", "VoiceLibrary", custom, sizeof custom)) {
+    int n = 0, i, old;
+    if ((g_dll = loaded_interposer(&old)) != NULL) {
+        GetModuleFileNameA(g_dll, g_dll_path, MAX_PATH);
+        return 1;
+    }
+    if (old) {
+        /* a second copy beside one that predates voice chat would install every hook again */
+        bf_log("voice: the LANCommander Interposer in the game has no voice chat; update it for voice chat");
+        return 0;
+    }
+    lstrcpynA(custom, bf_setting_str("voiceLibrary"), sizeof custom);
+    if (custom[0]) {
         tries[n++] = custom;
     }
-    tries[n++] = "bf1942patch\\LANCommander.Comms.dll";
+    tries[n++] = "bf1942patch\\LANCommander.Interposer.dll";
     if (bf_module() && GetModuleFileNameA(bf_module(), self, MAX_PATH) && (slash = strrchr(self, '\\')) != NULL) {
-        strcpy(slash + 1, "LANCommander.Comms.dll");
+        strcpy(slash + 1, "LANCommander.Interposer.dll");
         tries[n++] = self;
     }
-    tries[n++] = "LANCommander.Comms.dll";
-    for (i = 0; i < n && !g_dll; i++) {
+    tries[n++] = "LANCommander.Interposer.dll";
+    for (i = 0; i < n; i++) {
         if (tries[i][0] && tries[i][1] == ':') {
-            lstrcpynA(path, tries[i], MAX_PATH);
+            lstrcpynA(g_dll_path, tries[i], MAX_PATH);
         } else {
-            snprintf(path, sizeof path, "%s%s", bf_game_dir(), tries[i]);
+            snprintf(g_dll_path, sizeof g_dll_path, "%s%s", bf_game_dir(), tries[i]);
         }
-        if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
-            g_dll = LoadLibraryExA(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH);
-            if (!g_dll) {
-                bf_log("voice: cannot load %s (%lu)", path, GetLastError());
-            }
+        if (GetFileAttributesA(g_dll_path) != INVALID_FILE_ATTRIBUTES) {
+            return 1;
         }
     }
-    if (!g_dll) {
-        bf_log("voice: no LANCommander.Comms.dll in %sbf1942patch, no voice chat", bf_game_dir());
-        return 0;
+    bf_log("voice: no LANCommander.Interposer.dll in %sbf1942patch, no voice chat", bf_game_dir());
+    return 0;
+}
+
+/* the Interposer with the voice API this patch was built for, loaded on the game thread (not in a DllMain: loading
+ * it installs its hooks); NULL without one. The game and the dedicated server (voice_server_win.c) both use it. */
+HMODULE bf_voice_library(void)
+{
+    static int tried;
+    uint32_t (INTERPOSER_CALL *version)(void);
+    const char *(INTERPOSER_CALL *version_string)(void);
+    if (tried) {
+        return g_dll;
     }
-    GetModuleFileNameA(g_dll, path, MAX_PATH);
-    if (!resolve()) {
-        return 0;
+    tried = 1;
+    if (!g_dll && !g_dll_path[0] && !find_library()) {
+        return NULL;
     }
-    if (p_comms_get_api_version() != COMMS_API_VERSION) {
-        bf_log("voice: %s has API version %u, the patch needs %u; no voice chat", path, p_comms_get_api_version(),
-               COMMS_API_VERSION);
-        return 0;
+    if (!g_dll && !(g_dll = LoadLibraryExA(g_dll_path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH))) {
+        bf_log("voice: cannot load %s (%lu), no voice chat", g_dll_path, GetLastError());
+        return NULL;
     }
-    bf_log("voice: %s %s", path, p_comms_get_version_string());
-    return 1;
+    version = (uint32_t (INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_dll, "interposer_comms_get_api_version");
+    version_string = (const char *(INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_dll,
+                                                                                          "interposer_comms_get_version_string");
+    if (!version || !version_string || version() != INTERPOSER_COMMS_API_VERSION) {
+        bf_log("voice: %s has voice API version %u, the patch needs %u; no voice chat", g_dll_path,
+               version ? version() : 0, INTERPOSER_COMMS_API_VERSION);
+        g_dll = NULL;
+        return NULL;
+    }
+    bf_log("voice: %s (Interposer %s)", g_dll_path, version_string());
+    return g_dll;
+}
+
+static int load_library(void)
+{
+    return bf_voice_library() && resolve();
 }
 
 /* any of the library's threads (bf_log is) */
-static void COMMS_CALL comms_log(comms_log_level level, const char *message, void *user)
+static void INTERPOSER_CALL voice_log(interposer_comms_log_level level, const char *message, void *user)
 {
     static const char *const names[] = {"trace", "debug", "info", "warn", "error"};
     (void)user;
-    bf_log("voice: [comms %s] %s", level <= COMMS_LOG_ERROR ? names[level] : "?", message);
+    bf_log("voice: [interposer %s] %s", level <= INTERPOSER_COMMS_LOG_ERROR ? names[level] : "?", message);
 }
 
 /* ---------------------------------------------------------------- keys */
@@ -193,22 +271,23 @@ void bf_voice_set_key(int which, const char *name)
 {
     lstrcpynA(g_keys[which], name, sizeof g_keys[0]);
     g_vk[which] = name[0] ? bf_voice_vk(name) : 0;
-    bf_ini_set_str("Voice", which == BF_VOICE_RADIO ? "RadioKey" : "ProximityKey", name[0] ? name : "none");
+    bf_setting_keep_str(which == BF_VOICE_RADIO ? "radioKey" : "proximityKey", name[0] ? name : "none");
     bf_log("voice: %s key %s", which == BF_VOICE_RADIO ? "radio" : "proximity", name[0] ? name : "none");
 }
 
-/* a key setting: missing = the default, "none" = no key */
-static void load_key(int which, const char *key, const char *def)
+/* a key option: empty = the default, "none" = no key */
+static void load_key(int which, const char *name)
 {
-    if (!bf_ini_str("Voice", key, g_keys[which], sizeof g_keys[0])) {
-        strcpy(g_keys[which], def);
+    lstrcpynA(g_keys[which], bf_setting_str(name), sizeof g_keys[0]);
+    if (!g_keys[which][0]) {
+        lstrcpynA(g_keys[which], bf_options[bf_option_find(name)].def_str, sizeof g_keys[0]);
     }
     if (!_stricmp(g_keys[which], "none")) {
         g_keys[which][0] = '\0';
     }
     g_vk[which] = g_keys[which][0] ? bf_voice_vk(g_keys[which]) : 0;
     if (g_keys[which][0] && !g_vk[which]) {
-        bf_log("voice: [Voice] %s=%s is not a keyboard key or mouse button", key, g_keys[which]);
+        bf_log("voice: bf1942patch.%s %s is not a keyboard key or mouse button", name, g_keys[which]);
     }
 }
 
@@ -271,13 +350,32 @@ static int team_of(int id)
     return object(player) && readable((BYTE *)player + PLAYER_TEAM, 4) ? *(int *)((BYTE *)player + PLAYER_TEAM) : 0;
 }
 
+int bf_voice_player(int id, char *name, int size)
+{
+    void *pm = *(void **)BF_ADDR(PLAYER_MANAGER), *player;
+    const void *s;
+    if (id < 0 || id > 255 || !object(pm)) {
+        return 0;
+    }
+    player = ((void *(__attribute__((thiscall)) *)(void *, int))(*(void ***)pm)[PM_BY_ID / 4])(pm, id);
+    if (!object(player) || player == vcall(pm, PM_LOCAL) || (BYTE)(uintptr_t)vcall(player, PLAYER_IS_AI)) {
+        return 0;
+    }
+    s = vcall(player, PLAYER_NAME);
+    if (!readable(s, BF_STRING_SIZE) || !readable(bf_string_chars(s), 1)) {
+        return 0;
+    }
+    lstrcpynA(name, bf_string_chars(s), size);
+    return name[0] != '\0';
+}
+
 /* ---------------------------------------------------------------- the client */
 
 int bf_voice_volume = 100, bf_voice_mic = 100;
 
-static comms_client *g_client;
+static interposer_comms_client *g_client;
 static int g_failed;
-static WORD g_port = COMMS_DEFAULT_PORT;     /* if the game server does not say */
+static WORD g_port = INTERPOSER_COMMS_DEFAULT_PORT;     /* if the game server does not say */
 static char g_password[128], g_fixed_host[256], g_join_host[256];
 static WORD g_join_port;
 static WORD g_query_ports[8];
@@ -286,7 +384,7 @@ unsigned char bf_voice_va[2];                /* voice activation: nearby, radio 
 static int g_applied_va = -1, g_saved_va;
 static int g_radio_tail;                     /* the voice being sent goes to the team */
 static ULONGLONG g_key_up;                   /* a key was last held */
-static comms_group_id g_team;
+static interposer_comms_group_id g_team;
 static int g_held[2];
 static int g_claim_by_name;                  /* the server did not know our id: claim by name */
 static ULONGLONG g_last_update, g_last_attempt, g_seen;
@@ -299,15 +397,79 @@ const bf_voice_state *bf_voice_now(void)
     return &g_state;
 }
 
+/* ---------------------------------------------------------------- the microphone */
+
+/* bf1942patch.inputDevice: the capture device's id as the library lists it, "" = the system's default. The Controls
+ * options' MICROPHONE row (voice_menu.c) steps through the default and every device listed at the time */
+#define MAX_MICS        32
+static char g_mic[256];
+static interposer_comms_audio_device g_mics[MAX_MICS];
+
+/* the capture devices now (none before the library is loaded) */
+static uint32_t list_mics(void)
+{
+    uint32_t n = 0;
+    if (!p_comms_list_audio_devices
+        || p_comms_list_audio_devices(INTERPOSER_COMMS_DEVICE_CAPTURE, g_mics, MAX_MICS, &n) != INTERPOSER_COMMS_OK) {
+        return 0;
+    }
+    return n < MAX_MICS ? n : MAX_MICS;
+}
+
+/* the chosen device's index in g_mics; -1 for the default (also when the chosen one is not plugged in) */
+static int mic_index(uint32_t n)
+{
+    uint32_t i;
+    for (i = 0; g_mic[0] && i < n; i++) {
+        if (!strcmp(g_mics[i].id, g_mic)) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+void bf_voice_mic_text(wchar_t *out, int size)
+{
+    const int max = 30;              /* what the row's box holds */
+    int i = mic_index(list_mics()), n;
+    if (i < 0 || !MultiByteToWideChar(CP_UTF8, 0, g_mics[i].name, -1, out, size)) {
+        lstrcpynW(out, L"DEFAULT", size);
+        return;
+    }
+    n = lstrlenW(out);
+    if (n > max && size > max) {
+        lstrcpyW(out + max - 3, L"...");
+        n = max;
+    }
+    CharUpperBuffW(out, (DWORD)n);
+}
+
+void bf_voice_next_mic(void)
+{
+    uint32_t n = list_mics();
+    int i = mic_index(n) + 1;
+    lstrcpynA(g_mic, i < (int)n ? g_mics[i].id : "", sizeof g_mic);
+    bf_setting_keep_str("inputDevice", g_mic);
+    if (g_client) {
+        p_comms_client_set_capture_device(g_client, g_mic[0] ? g_mic : NULL);
+    }
+    bf_log("voice: microphone %s", g_mic[0] ? g_mics[i].name : "the default");
+}
+
 static int create(void)
 {
-    comms_client_config config;
-    comms_talk_target nearby = {COMMS_TARGET_PROXIMITY, 0};
-    p_comms_set_log_handler(comms_log, COMMS_LOG_INFO, NULL);
+    interposer_comms_client_config config;
+    interposer_comms_talk_target nearby = {INTERPOSER_COMMS_TARGET_PROXIMITY, 0};
+    int mic = mic_index(list_mics());
+    p_comms_set_log_handler(voice_log, INTERPOSER_COMMS_LOG_INFO, NULL);
     p_comms_client_config_init(&config);
-    config.transmit_mode = COMMS_TRANSMIT_PUSH_TO_TALK;   /* update_activation sets it */
+    config.transmit_mode = INTERPOSER_COMMS_TRANSMIT_PUSH_TO_TALK;   /* update_activation sets it */
     config.voice_activation.auto_threshold = 1;
-    if (p_comms_client_create(&config, &g_client) != COMMS_OK) {
+    if (g_mic[0] && mic < 0) {
+        bf_log("voice: the microphone of bf1942patch.inputDevice is not there, using the default");
+    }
+    config.capture_device_id = mic >= 0 ? g_mic : NULL;
+    if (p_comms_client_create(&config, &g_client) != INTERPOSER_COMMS_OK) {
         bf_log("voice: the voice client could not be created");
         return 0;
     }
@@ -322,8 +484,8 @@ static int create(void)
 
 static void connect_to(const char *host, WORD port, const char *name, int id)
 {
-    comms_connect_info info;
-    comms_result r;
+    interposer_comms_connect_info info;
+    interposer_comms_result r;
     p_comms_connect_info_init(&info);
     info.host = host;
     info.port = port;
@@ -338,7 +500,7 @@ static void update_connection(ULONGLONG now)
 {
     char name[64], host[256];
     int id, team, in_game = local_player(name, sizeof name, &id, &team);
-    comms_connection_state state = p_comms_client_get_state(g_client);
+    interposer_comms_connection_state state = p_comms_client_get_state(g_client);
     WORD game_port, voice_port;
     DWORD addr;
     int r;
@@ -346,7 +508,7 @@ static void update_connection(ULONGLONG now)
         g_seen = now;
     } else {
         bf_voice_query_cancel();
-        if (state != COMMS_STATE_DISCONNECTED && now - g_seen > LEAVE_MS) {
+        if (state != INTERPOSER_COMMS_STATE_DISCONNECTED && now - g_seen > LEAVE_MS) {
             bf_log("voice: left the game, disconnecting");
             p_comms_client_disconnect(g_client);
         }
@@ -368,7 +530,7 @@ static void update_connection(ULONGLONG now)
         connect_to(bf_voice_query_address(), r > 0 ? voice_port : g_port, name, id);
         return;
     }
-    if (state != COMMS_STATE_DISCONNECTED || now - g_last_attempt < RECONNECT_MS) {
+    if (state != INTERPOSER_COMMS_STATE_DISCONNECTED || now - g_last_attempt < RECONNECT_MS) {
         return;
     }
     /* VoiceServer, else the +joinServer the game was started with, else the game's traffic */
@@ -413,30 +575,38 @@ static void update_keys(void)
     }
 }
 
+static void apply_mutes(void);
+
 static void drain_events(void)
 {
-    comms_client_event e;
-    while (p_comms_client_poll_event(g_client, &e) == COMMS_OK) {
+    interposer_comms_client_event e;
+    while (p_comms_client_poll_event(g_client, &e) == INTERPOSER_COMMS_OK) {
         switch (e.type) {
-        case COMMS_CLIENT_EVENT_STATE_CHANGED:
-            bf_log("voice: %s%s%s", e.state == COMMS_STATE_CONNECTED ? "connected"
-                                    : e.state == COMMS_STATE_DISCONNECTED ? "disconnected" : "connecting",
-                   e.reason ? ": " : "", e.reason ? p_comms_result_to_string((comms_result)e.reason) : "");
-            if (e.state == COMMS_STATE_DISCONNECTED) {
-                g_team = COMMS_INVALID_ID;
-                if (e.reason == COMMS_ERR_AUTH_FAILED) {
+        case INTERPOSER_COMMS_CLIENT_EVENT_PLAYER_JOINED:
+            apply_mutes();
+            break;
+        case INTERPOSER_COMMS_CLIENT_EVENT_STATE_CHANGED:
+            bf_log("voice: %s%s%s", e.state == INTERPOSER_COMMS_STATE_CONNECTED ? "connected"
+                                    : e.state == INTERPOSER_COMMS_STATE_DISCONNECTED ? "disconnected" : "connecting",
+                   e.reason ? ": " : "", e.reason ? p_comms_result_to_string((interposer_comms_result)e.reason) : "");
+            if (e.state == INTERPOSER_COMMS_STATE_CONNECTED) {
+                apply_mutes();
+            }
+            if (e.state == INTERPOSER_COMMS_STATE_DISCONNECTED) {
+                g_team = INTERPOSER_COMMS_INVALID_ID;
+                if (e.reason == INTERPOSER_COMMS_ERR_AUTH_FAILED) {
                     g_claim_by_name = !g_claim_by_name;   /* no player with our id: try by name, and back */
                     g_last_attempt = 0;
                 }
             }
             break;
-        case COMMS_CLIENT_EVENT_GROUP_ADDED: {
+        case INTERPOSER_COMMS_CLIENT_EVENT_GROUP_ADDED: {
             /* the server shows us our own team's group only: the radio talks to it */
-            comms_client_group_info info;
-            if (p_comms_client_get_group_info(g_client, e.group, &info) == COMMS_OK && info.type == COMMS_GROUP_SERVER
-                && info.is_member) {
-                comms_talk_target radio;
-                radio.kind = COMMS_TARGET_GROUP;
+            interposer_comms_client_group_info info;
+            if (p_comms_client_get_group_info(g_client, e.group, &info) == INTERPOSER_COMMS_OK
+                && info.type == INTERPOSER_COMMS_GROUP_SERVER && info.is_member) {
+                interposer_comms_talk_target radio;
+                radio.kind = INTERPOSER_COMMS_TARGET_GROUP;
                 radio.id = e.group;
                 g_team = e.group;
                 p_comms_client_set_ptt_targets(g_client, SLOT_RADIO, &radio, 1);
@@ -445,16 +615,16 @@ static void drain_events(void)
             }
             break;
         }
-        case COMMS_CLIENT_EVENT_GROUP_REMOVED:
+        case INTERPOSER_COMMS_CLIENT_EVENT_GROUP_REMOVED:
             if (e.group == g_team) {
-                g_team = COMMS_INVALID_ID;
+                g_team = INTERPOSER_COMMS_INVALID_ID;
                 g_applied_va = -1;
             }
             break;
-        case COMMS_CLIENT_EVENT_AUDIO_DEVICE_LOST:
+        case INTERPOSER_COMMS_CLIENT_EVENT_AUDIO_DEVICE_LOST:
             bf_log("voice: audio device lost: %s", e.text);
             break;
-        case COMMS_CLIENT_EVENT_KICKED:
+        case INTERPOSER_COMMS_CLIENT_EVENT_KICKED:
             bf_log("voice: removed from voice: %s", e.text);
             break;
         default:
@@ -477,20 +647,233 @@ static void hud_name(char *out, int size, const char *in)
     lstrcpynA(out, in, size);
 }
 
+/* ---------------------------------------------------------------- muted players */
+
+/* By the game's name (Windows-1252), kept with the profile as the buddies are. The buddy list is the console script
+ * Settings/Profiles/<profile>/BuddyList.con, a game.addPlayerToBuddyListByName "<name>" line per buddy: rewritten
+ * whole on every change (0x468740: the path through the app's write path 0x445c40, FileHandle open 0x583a20, write
+ * 0x5839f0, close 0x583870), and run through the console whenever a profile loads (0x467c10, called at 0x48fc2d and
+ * 0x4939f3: the read path 0x445ad0, the console [0x9a9420] vtable +0x20 run(path, 8 arguments, 0x9a9428)). The mutes
+ * are Settings/Profiles/<profile>/VoiceMuteList.con next to it, a bf1942patch.voiceMute "<name>" line per player,
+ * written and run the same way (both calls to 0x467c10 are redirected to run it after the buddies). saves.c moves
+ * both to the save folder. */
+#define MAX_MUTED       64
+#define MUTE_FILE       "VoiceMuteList.con"
+#define APP_READ_PATH   0x445ad0u    /* thiscall(app, std::string *out, std::string path) -> out */
+#define APP_WRITE_PATH  0x445c40u
+#define PROFILES        0xa5c630u    /* the profile manager: 0x69b790 thiscall -> the current profile's name */
+#define PROFILE_NAME    0x69b790u
+#define CONSOLE         0x9a9420u
+#define CONSOLE_RUN     0x20
+#define CONSOLE_CONTEXT 0x9a9428u
+#define FH_CTOR         0x583840u
+#define FH_DTOR         0x583850u
+#define FH_CLOSE        0x583870u
+#define FH_OPEN         0x583a20u    /* thiscall(fh, const std::string *path, 0, 1, 0) -> opened (to write) */
+#define FH_WRITE        0x5839f0u
+#define BUDDY_LOAD      0x467c10u
+#define APP_PTR         0x971eacu
+static const uint32_t BUDDY_LOAD_CALLS[] = {0x48fc2du, 0x4939f3u};
+
+static char g_muted[MAX_MUTED][64];
+static int g_n_muted;
+static int g_loading;                /* the profile's file runs: its lines do not save it again */
+
+typedef void *(__attribute__((thiscall)) *path_fn)(void *app, void *out, bf_msvc_string path);
+
+/* where the profile's VoiceMuteList.con is read (or written): a std::string in out; 0 without a profile */
+static int mute_path(uint32_t resolve, void *out)
+{
+    void *profiles = *(void **)BF_ADDR(PROFILES), *app = *(void **)BF_ADDR(APP_PTR);
+    const void *profile;
+    char rel[MAX_PATH];
+    bf_msvc_string s;
+    if (!profiles || !app) {
+        return 0;
+    }
+    profile = ((const void *(__attribute__((thiscall)) *)(void *))BF_ADDR(PROFILE_NAME))(profiles);
+    if (!readable(profile, BF_STRING_SIZE) || !bf_string_chars(profile)[0]) {
+        return 0;
+    }
+    snprintf(rel, sizeof rel, "Settings/Profiles/%s/" MUTE_FILE, bf_string_chars(profile));
+    if (!bf_string_init(&s, rel)) {
+        return 0;
+    }
+    ((path_fn)BF_ADDR(resolve))(app, out, s);   /* destroys s */
+    return 1;
+}
+
+static void save_mutes(void)
+{
+    typedef void (__attribute__((thiscall)) *fh_fn)(void *fh);
+    typedef char (__attribute__((thiscall)) *open_fn)(void *fh, const void *path, int a, int b, int c);
+    typedef void (__attribute__((thiscall)) *write_fn)(void *fh, const void *line);
+    BYTE fh[64], path[BF_STRING_SIZE], line[BF_STRING_SIZE];
+    char text[96];
+    int i;
+    if (g_loading || !mute_path(APP_WRITE_PATH, path)) {
+        return;
+    }
+    ((fh_fn)BF_ADDR(FH_CTOR))(fh);
+    if (((open_fn)BF_ADDR(FH_OPEN))(fh, path, 0, 1, 0)) {
+        for (i = 0; i < g_n_muted; i++) {
+            snprintf(text, sizeof text, "bf1942patch.voiceMute \"%s\"\n", g_muted[i]);
+            if (bf_string_init(line, text)) {
+                ((write_fn)BF_ADDR(FH_WRITE))(fh, line);
+                bf_string_free(line);
+            }
+        }
+        ((fh_fn)BF_ADDR(FH_CLOSE))(fh);
+    } else {
+        bf_log("voice: cannot write %s", bf_string_chars(path));
+    }
+    ((fh_fn)BF_ADDR(FH_DTOR))(fh);
+    bf_string_free(path);
+}
+
+/* the profile's mutes, after its buddies */
+static void __attribute__((thiscall)) hk_buddy_load(void *buddies)
+{
+    typedef void (__attribute__((thiscall)) *run_fn)(void *con, const void *path, void *a1, void *a2, void *a3,
+                                                     void *a4, void *a5, void *a6, void *a7, void *a8, void *context);
+    void *con = *(void **)BF_ADDR(CONSOLE);
+    BYTE path[BF_STRING_SIZE], a[8][BF_STRING_SIZE];
+    int i, n = 0;
+    ((void (__attribute__((thiscall)) *)(void *))BF_ADDR(BUDDY_LOAD))(buddies);
+    g_n_muted = 0;
+    if (!object(con) || !mute_path(APP_READ_PATH, path)) {
+        return;
+    }
+    while (n < 8 && bf_string_init(a[n], "")) {
+        n++;
+    }
+    if (n == 8) {
+        g_loading = 1;
+        ((run_fn)(*(void ***)con)[CONSOLE_RUN / 4])(con, path, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7],
+                                                    BF_ADDR(CONSOLE_CONTEXT));
+        g_loading = 0;
+    }
+    for (i = 0; i < n; i++) {
+        bf_string_free(a[i]);
+    }
+    bf_string_free(path);
+    bf_log("voice: %d muted player%s in the profile", g_n_muted, g_n_muted == 1 ? "" : "s");
+    if (g_client) {
+        apply_mutes();
+    }
+}
+
+static int muted_index(const char *name)
+{
+    int i;
+    for (i = 0; i < g_n_muted; i++) {
+        if (!strcmp(g_muted[i], name)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int bf_voice_muted(const char *name)
+{
+    return muted_index(name) >= 0;
+}
+
+/* every voice player muted or not as the list says */
+static void apply_mutes(void)
+{
+    interposer_comms_player_id ids[64];
+    interposer_comms_client_player_info info;
+    char name[64];
+    uint32_t n = 0, i;
+    int m;
+    if (p_comms_client_get_state(g_client) != INTERPOSER_COMMS_STATE_CONNECTED
+        || p_comms_client_list_players(g_client, ids, 64, &n) != INTERPOSER_COMMS_OK) {
+        return;
+    }
+    for (i = 0; i < n && i < 64; i++) {
+        if (p_comms_client_get_player_info(g_client, ids[i], &info) != INTERPOSER_COMMS_OK) {
+            continue;
+        }
+        hud_name(name, sizeof name, info.name);
+        m = bf_voice_muted(name);
+        if (m != (info.locally_muted != 0)) {
+            p_comms_client_set_player_muted(g_client, ids[i], m);
+            bf_log("voice: %s %s", name, m ? "muted" : "unmuted");
+        }
+    }
+}
+
+void bf_voice_set_muted(const char *name, int muted)
+{
+    int i = muted_index(name);
+    if (!name[0] || muted == (i >= 0) || (muted && g_n_muted == MAX_MUTED)) {
+        return;
+    }
+    if (muted) {
+        lstrcpynA(g_muted[g_n_muted++], name, sizeof g_muted[0]);
+    } else {
+        memmove(g_muted[i], g_muted[i + 1], (size_t)(g_n_muted - i - 1) * sizeof g_muted[0]);
+        g_n_muted--;
+    }
+    save_mutes();
+    if (!g_loading) {
+        bf_log("voice: %s %s", name, muted ? "muted" : "unmuted");
+    }
+    if (g_client && !g_loading) {
+        apply_mutes();
+    }
+}
+
+/* bf1942patch.voiceMute "<name>" / voiceUnmute "<name>" (the profile's VoiceMuteList.con, or typed) */
+static void mute_cmd(const char *cmd, int argc, const char *const *argv, char *out, int size)
+{
+    char name[64];
+    int i;
+    name[0] = '\0';
+    for (i = 0; i < argc; i++) {     /* an unquoted name with spaces comes in pieces */
+        if (i) {
+            strncat(name, " ", sizeof name - strlen(name) - 1);
+        }
+        strncat(name, argv[i], sizeof name - strlen(name) - 1);
+    }
+    bf_voice_set_muted(name, !strcmp(cmd, "voiceMute"));
+    (void)out;
+    (void)size;
+}
+
+static void install_mutes(void)
+{
+    size_t i;
+    int ok = bf_console_add("voiceMute", BF_CONSOLE_METHOD, mute_cmd)
+             && bf_console_add("voiceUnmute", BF_CONSOLE_METHOD, mute_cmd);
+    for (i = 0; i < sizeof BUDDY_LOAD_CALLS / sizeof BUDDY_LOAD_CALLS[0]; i++) {
+        ok &= bf_redirect_call(BUDDY_LOAD_CALLS[i], BUDDY_LOAD, hk_buddy_load);
+    }
+    if (!ok) {
+        bf_log("voice: the buddy list code differs, muted players are not kept with the profile");
+    }
+}
+
+int bf_voice_running(void)
+{
+    return g_client != NULL;
+}
+
 static void update_state(void)
 {
-    comms_speaker_info speakers[BF_VOICE_MAX_TALKERS];
-    comms_transmit_state tx;
+    interposer_comms_speaker_info speakers[BF_VOICE_MAX_TALKERS];
+    interposer_comms_transmit_state tx;
     uint32_t n = 0, i;
     int id;
     bf_voice_state *s = &g_state;
-    s->connected = p_comms_client_get_state(g_client) == COMMS_STATE_CONNECTED;
+    s->connected = p_comms_client_get_state(g_client) == INTERPOSER_COMMS_STATE_CONNECTED;
     s->n = 0;
     s->talking = s->radio = 0;
     if (s->connected && !local_player(s->me, sizeof s->me, &id, &s->my_team)) {
         s->me[0] = 0;
     }
-    if (s->connected && p_comms_client_get_transmit_state(g_client, &tx) == COMMS_OK) {
+    if (s->connected && p_comms_client_get_transmit_state(g_client, &tx) == INTERPOSER_COMMS_OK) {
         s->talking = tx.transmitting;
         /* to the team while its key is held, and for the release delay after (which sends with no key held); else by
          * voice activation, to the team when only the radio has it */
@@ -503,17 +886,18 @@ static void update_state(void)
         }
         s->radio = g_radio_tail;
     }
-    if (s->connected && p_comms_client_get_active_speakers(g_client, speakers, BF_VOICE_MAX_TALKERS, &n) == COMMS_OK) {
+    if (s->connected
+        && p_comms_client_get_active_speakers(g_client, speakers, BF_VOICE_MAX_TALKERS, &n) == INTERPOSER_COMMS_OK) {
         for (i = 0; i < n && i < BF_VOICE_MAX_TALKERS; i++) {
-            comms_client_player_info info;
+            interposer_comms_client_player_info info;
             bf_voice_talker *t = &s->talkers[s->n];
             if (speakers[i].locally_muted
-                || p_comms_client_get_player_info(g_client, speakers[i].player, &info) != COMMS_OK) {
+                || p_comms_client_get_player_info(g_client, speakers[i].player, &info) != INTERPOSER_COMMS_OK) {
                 continue;
             }
             hud_name(t->name, sizeof t->name, info.name);
             t->team = info.game_player_id ? team_of((int)info.game_player_id - 1) : 0;   /* the bridge's ids are engine id + 1 */
-            t->radio = speakers[i].kind == COMMS_TARGET_GROUP;
+            t->radio = speakers[i].kind == INTERPOSER_COMMS_TARGET_GROUP;
             s->n++;
         }
     }
@@ -541,39 +925,40 @@ static void update_volumes(ULONGLONG now)
     if (g_changed && now - g_changed >= SAVE_MS) {
         g_changed = 0;
         if (v != g_saved_volume) {
-            bf_ini_set_int("Voice", "VoiceVolume", g_saved_volume = v);
+            bf_setting_keep_int("voiceVolume", g_saved_volume = v);
         }
         if (m != g_saved_mic) {
-            bf_ini_set_int("Voice", "MicSensitivity", g_saved_mic = m);
+            bf_setting_keep_int("micSensitivity", g_saved_mic = m);
         }
         bf_log("voice: voice volume %d%%, microphone %d%%", v, m);
     }
 }
 
 /* the voice activation check boxes: voice activation sends to the default targets (nearby, the team or both) whenever
- * the microphone hears speech; the keys still send to their own targets. Applied at once, kept in Settings.ini */
+ * the microphone hears speech; the keys still send to their own targets. Applied at once, kept in the player's bf1942patch.con */
 static void update_activation(void)
 {
-    comms_talk_target targets[2];
+    interposer_comms_talk_target targets[2];
     int va = (bf_voice_va[0] ? 1 : 0) | (bf_voice_va[1] ? 2 : 0), n = 0;
     if (va == g_applied_va) {
         return;
     }
     if (va & 1) {
-        targets[n].kind = COMMS_TARGET_PROXIMITY;
+        targets[n].kind = INTERPOSER_COMMS_TARGET_PROXIMITY;
         targets[n++].id = 0;
     }
     if ((va & 2) && g_team) {
-        targets[n].kind = COMMS_TARGET_GROUP;
+        targets[n].kind = INTERPOSER_COMMS_TARGET_GROUP;
         targets[n++].id = g_team;
     }
     if (n) {
         p_comms_client_set_talk_targets(g_client, targets, (uint32_t)n);
     }
-    p_comms_client_set_transmit_mode(g_client, n ? COMMS_TRANSMIT_VOICE_ACTIVITY : COMMS_TRANSMIT_PUSH_TO_TALK);
+    p_comms_client_set_transmit_mode(g_client, n ? INTERPOSER_COMMS_TRANSMIT_VOICE_ACTIVITY
+                                                 : INTERPOSER_COMMS_TRANSMIT_PUSH_TO_TALK);
     if (va != g_saved_va) {
-        bf_ini_set_int("Voice", "VoiceActivation", va & 1);
-        bf_ini_set_int("Voice", "RadioActivation", (va & 2) >> 1);
+        bf_setting_keep_int("voiceActivation", va & 1);
+        bf_setting_keep_int("radioActivation", (va & 2) >> 1);
         g_saved_va = va;
         bf_log("voice: nearby %s, radio %s", va & 1 ? "voice activation" : "push to talk",
                va & 2 ? "voice activation" : "push to talk");
@@ -587,7 +972,7 @@ static void tick(void)
     if (g_failed) {
         return;
     }
-    if (!g_client && !create()) {
+    if (!g_client && !(load_library() && create())) {   /* the first step: the Interposer is loaded here */
         g_failed = 1;
         return;
     }
@@ -604,6 +989,33 @@ static void tick(void)
     bf_voice_menu_tick();
 }
 
+/* ---------------------------------------------------------------- the options set in the console */
+
+/* the volumes (bound to bf_voice_volume / bf_voice_mic): update_volumes applies them with its next update */
+static void volumes_changed(void)
+{
+}
+
+static void activation_changed(void)
+{
+    bf_voice_va[0] = (unsigned char)(bf_setting_int("voiceActivation") != 0);
+    bf_voice_va[1] = (unsigned char)(bf_setting_int("radioActivation") != 0);
+}
+
+static void keys_changed(void)
+{
+    load_key(BF_VOICE_NEARBY, "proximityKey");
+    load_key(BF_VOICE_RADIO, "radioKey");
+}
+
+static void mic_changed(void)
+{
+    lstrcpynA(g_mic, bf_setting_str("inputDevice"), sizeof g_mic);
+    if (g_client) {
+        p_comms_client_set_capture_device(g_client, g_mic[0] ? g_mic : NULL);
+    }
+}
+
 /* ---------------------------------------------------------------- hooks */
 
 static DWORD (__attribute__((thiscall)) *g_frame)(void *app);
@@ -615,7 +1027,7 @@ static DWORD __attribute__((thiscall)) hk_frame(void *app)
     return r;
 }
 
-/* when another plugin hooked the main loop step first (the LANCommander Comms plugin does): every rendered frame */
+/* when another plugin hooked the main loop step first (LANCommander.Voice's BF1942 plugin does): each rendered frame */
 static void present_tick(void *device, int after)
 {
     (void)device;
@@ -641,27 +1053,34 @@ void bf_voice_install(void)
 {
     static const BYTE frame_head[6] = {0x55, 0x8b, 0xec, 0x83, 0xe4, 0xf8};   /* push ebp; mov ebp,esp; and esp,-8 */
     char text[256], name[48];
-    if (!bf_ini_int("Voice", "VoiceChat", 1)) {
-        bf_log("voice: VoiceChat=0, no voice chat");
+    if (!bf_setting_int("voiceChat")) {
+        bf_log("voice: voiceChat 0, no voice chat");
         return;
     }
-    if (!load_library()) {
+    if (!find_library()) {
         return;
     }
-    g_port = (WORD)bf_ini_int("Voice", "VoicePort", COMMS_DEFAULT_PORT);
-    bf_ini_str("Voice", "VoicePassword", g_password, sizeof g_password);
-    bf_ini_str("Voice", "VoiceServer", g_fixed_host, sizeof g_fixed_host);
-    if (!bf_ini_str("Voice", "VoiceQueryPorts", text, sizeof text)) {
-        strcpy(text, "22000,23000");
-    }
+    g_port = (WORD)bf_setting_int("voicePort");
+    lstrcpynA(g_password, bf_setting_str("voicePassword"), sizeof g_password);
+    lstrcpynA(g_fixed_host, bf_setting_str("voiceServer"), sizeof g_fixed_host);
+    lstrcpynA(text, bf_setting_str("voiceQueryPorts"), sizeof text);
     g_n_query_ports = bf_voice_ports(text, g_query_ports, 8);
-    bf_voice_va[0] = (unsigned char)(bf_ini_int("Voice", "VoiceActivation", 0) != 0);
-    bf_voice_va[1] = (unsigned char)(bf_ini_int("Voice", "RadioActivation", 0) != 0);
+    activation_changed();
     g_saved_va = bf_voice_va[0] | bf_voice_va[1] << 1;
-    bf_voice_volume = g_saved_volume = bf_ini_int("Voice", "VoiceVolume", 100);
-    bf_voice_mic = g_saved_mic = bf_ini_int("Voice", "MicSensitivity", 100);
-    load_key(BF_VOICE_NEARBY, "ProximityKey", "IDKey_Capital");
-    load_key(BF_VOICE_RADIO, "RadioKey", "Mouse_IDButton_3");
+    bf_setting_bind("voiceVolume", &bf_voice_volume);   /* the Sound sliders and the console share them */
+    bf_setting_bind("micSensitivity", &bf_voice_mic);
+    g_saved_volume = bf_voice_volume;
+    g_saved_mic = bf_voice_mic;
+    mic_changed();
+    keys_changed();
+    bf_setting_watch("voiceActivation", activation_changed);
+    bf_setting_watch("radioActivation", activation_changed);
+    bf_setting_watch("voiceVolume", volumes_changed);
+    bf_setting_watch("micSensitivity", volumes_changed);
+    bf_setting_watch("proximityKey", keys_changed);
+    bf_setting_watch("radioKey", keys_changed);
+    bf_setting_watch("inputDevice", mic_changed);
+    install_mutes();
     bf_voice_join_server(GetCommandLineA(), g_join_host, sizeof g_join_host, &g_join_port);
 
     g_frame = (DWORD (__attribute__((thiscall)) *)(void *))bf_detour(FRAME_FN, frame_head, sizeof frame_head, hk_frame);
@@ -672,11 +1091,12 @@ void bf_voice_install(void)
     }
     real_sendto = bf_hook_import("WSOCK32.dll", "sendto", hk_sendto);
     if (!real_sendto) {
-        bf_log("voice: the game's sendto is not hooked; set VoiceServer if the game joins without restarting");
+        bf_log("voice: the game's sendto is not hooked; set bf1942patch.voiceServer if the game joins without restarting");
     }
-    /* the LANCommander Comms Interposer plugin stands down while this one runs the voice client */
+    /* LANCommander.Voice's BF1942 Interposer plugin stands down while this one runs the voice client */
     snprintf(name, sizeof name, "Local\\bf1942patch_voice_%lu", GetCurrentProcessId());
     CreateMutexA(NULL, FALSE, name);
     bf_voice_hud_install();
     bf_voice_menu_install();
+    bf_voice_scoreboard_install();
 }

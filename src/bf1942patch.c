@@ -1,7 +1,8 @@
-/* Core of the patch: verifies the exe, reads the settings, installs the patch modules.
- * Settings and log go to bf1942patch.ini / bf1942patch.log next to the DLL (dinput8.dll proxy and ASI builds), or
- * to the LANCommander Interposer's Config.yml / session log (plugin build, see interposer_plugin.c). Settings.ini in
- * the save folder (same sections and keys as bf1942patch.ini) overrides either, per key. */
+/* Core of the patch: verifies the exe, reads the options, installs the patch modules.
+ * The options are console variables bf1942patch.<name> (settings.h, settings_game.c): read from bf1942patch.con next
+ * to the DLL (dinput8.dll proxy and ASI builds; the plugin build adds the Interposer's Config.yml, see
+ * interposer_plugin.c), then from the player's bf1942patch.con in the save folder, and set in the console or by the
+ * game's .con files. The log goes to bf1942patch.log next to the DLL, or the Interposer's session log. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,24 +12,16 @@
 #define BF_TIMESTAMP 0x417564c4u    /* BF1942.exe 1.61 (version string "BF1942 (Ver: Tue, 19 Oct 2004 14:...)") */
 #define BF_ENTRY     0x404c1au
 
-static char g_ini[MAX_PATH];
 static char g_log[MAX_PATH];
-static int (*g_config_int)(const char *section, const char *key, int def);
 static void (*g_log_line)(const char *line);
-static int (*g_config_str)(const char *section, const char *key, char *out, int size);
 static CRITICAL_SECTION g_log_cs;
 static int g_log_cs_ready;
 static HMODULE g_module;
+static int g_server;                 /* in BF1942_w32ded.exe (voice_server_win.c) */
 
-void bf_set_backend(int (*config_int)(const char *section, const char *key, int def), void (*log_line)(const char *line))
+void bf_set_log_backend(void (*log_line)(const char *line))
 {
-    g_config_int = config_int;
     g_log_line = log_line;
-}
-
-void bf_set_string_backend(int (*config_str)(const char *section, const char *key, char *out, int size))
-{
-    g_config_str = config_str;
 }
 
 HMODULE bf_module(void)
@@ -174,87 +167,6 @@ int bf_redirect_call(uint32_t site, uint32_t old_target, const void *to)
     return bf_call(site, to);
 }
 
-const char *bf_ini_file(void)
-{
-    if (!g_ini[0]) {   /* Interposer plugin: settings the patch writes itself still go to bf1942patch.ini */
-        snprintf(g_ini, sizeof g_ini, "%sbf1942patch.ini", bf_game_dir());
-    }
-    return g_ini;
-}
-
-/* Settings.ini in the save folder (the install folder without one); NULL while the save folder is being worked out */
-const char *bf_user_ini_file(void)
-{
-    static char path[MAX_PATH];
-    const char *dir;
-    if (!path[0]) {
-        if (!(dir = bf_save_dir_ready())) {
-            return NULL;
-        }
-        snprintf(path, sizeof path, "%sSettings.ini", dir[0] ? dir : bf_game_dir());
-    }
-    return path;
-}
-
-/* the value of [section] key in Settings.ini, which wins over bf1942patch.ini / the Interposer's Config.yml */
-static int user_value(const char *section, const char *key, char *out, int size)
-{
-    const char *user = bf_user_ini_file();
-    if (!user) {
-        return 0;
-    }
-    GetPrivateProfileStringA(section, key, "\x01", out, size, user);
-    return strcmp(out, "\x01") != 0;
-}
-
-int bf_ini_int(const char *section, const char *key, int def)
-{
-    char value[64], *end;
-    long n;
-    if (user_value(section, key, value, sizeof value)) {
-        n = strtol(value, &end, 10);
-        return end == value ? def : (int)n;
-    }
-    if (g_config_int) {
-        return g_config_int(section, key, def);
-    }
-    return (int)GetPrivateProfileIntA(section, key, def, bf_ini_file());
-}
-
-/* text setting; out is left empty if the key is missing. Returns 1 if a non-empty value was read. */
-int bf_ini_str(const char *section, const char *key, char *out, int size)
-{
-    out[0] = '\0';
-    if (user_value(section, key, out, size)) {
-        return out[0] != '\0';
-    }
-    out[0] = '\0';
-    if (g_config_int) {   /* Interposer backend */
-        return g_config_str ? g_config_str(section, key, out, size) : 0;
-    }
-    GetPrivateProfileStringA(section, key, "", out, size, bf_ini_file());
-    return out[0] != '\0';
-}
-
-/* a setting changed in the game (the options menu): kept in Settings.ini, so it is per user and wins over the rest */
-void bf_ini_set_int(const char *section, const char *key, int value)
-{
-    char text[16];
-    const char *file = bf_user_ini_file();
-    snprintf(text, sizeof text, "%d", value);
-    if (!file || !WritePrivateProfileStringA(section, key, text, file)) {
-        bf_log("settings: cannot write [%s] %s=%s", section, key, text);
-    }
-}
-
-void bf_ini_set_str(const char *section, const char *key, const char *value)
-{
-    const char *file = bf_user_ini_file();
-    if (!file || !WritePrivateProfileStringA(section, key, value, file)) {
-        bf_log("settings: cannot write [%s] %s=%s", section, key, value);
-    }
-}
-
 static int exe_is_supported(void)
 {
     const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(NULL);
@@ -267,12 +179,18 @@ int bf_patch_start(void)
 {
     if (!exe_is_supported()) {
         char exe[MAX_PATH];
-        GetModuleFileNameA(NULL, exe, MAX_PATH);
-        bf_log("bf1942patch: %s is not the supported BF1942.exe 1.61; no patches applied", exe);
-        return 0;
+        if (bf_server_exe()) {
+            g_server = 1;
+        } else {
+            GetModuleFileNameA(NULL, exe, MAX_PATH);
+            bf_log("bf1942patch: %s is neither the supported BF1942.exe 1.61 nor BF1942_w32ded.exe 1.61; no patches "
+                   "applied", exe);
+            return 0;
+        }
     }
-    if (!bf_ini_int("General", "Enabled", 1)) {
-        bf_log("bf1942patch: disabled in the settings");
+    bf_settings_load(g_server);
+    if (!bf_setting_int("enabled")) {
+        bf_log("bf1942patch: disabled (bf1942patch.enabled 0)");
         return 0;
     }
     {
@@ -284,42 +202,17 @@ int bf_patch_start(void)
             return 0;
         }
     }
-    bf_log("bf1942patch " BF_VERSION ": BF1942.exe 1.61 recognised, installing (command line: %s)", GetCommandLineA());
+    bf_log("bf1942patch " BF_VERSION ": %s 1.61 recognised, installing (command line: %s)",
+           g_server ? "BF1942_w32ded.exe" : "BF1942.exe", GetCommandLineA());
     return 1;
-}
-
-/* an empty Settings.ini that says what it is for */
-static void scaffold_user_ini(void)
-{
-    const char *path = bf_user_ini_file();
-    FILE *f;
-    if (!path || GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
-        return;
-    }
-    f = fopen(path, "w");
-    if (!f) {
-        bf_log("settings: cannot create %s", path);
-        return;
-    }
-    fputs("; Battlefield 1942 settings of this player (bf1942patch). Any [Section] Key= of bf1942patch.ini next to\n"
-          "; BF1942.exe can be set here too and wins over that file, except [Saves]. The options the patch adds to the\n"
-          "; game's own menus are stored here. For example:\n"
-          ";\n"
-          "; [CDKey]\n"
-          "; Key=XXXX-XXXX-XXXX-XXXX-XXXX\n"
-          ";\n"
-          "; [Widescreen]\n"
-          "; HudScale=100\n"
-          ";\n"
-          "; [Voice]\n"
-          "; ProximityKey=IDKey_Capital\n", f);
-    fclose(f);
-    bf_log("settings: created %s", path);
 }
 
 void bf_install(void)
 {
-    scaffold_user_ini();
+    if (g_server) {
+        bf_server_install();         /* the dedicated server: its voice server only */
+        return;
+    }
     bf_crashlog_install();
     bf_saves_install();
     bf_registry_install();
@@ -328,6 +221,7 @@ void bf_install(void)
     bf_restart_install();
     bf_widescreen_install();
     bf_menu_install();
+    bf_settings_console_install();
     bf_gamepad_install();
     bf_framerate_install();
     bf_detail_install();
@@ -339,17 +233,17 @@ const char *bf_log_file(void)
     return g_log_line ? "" : g_log;
 }
 
-void bf_set_files(const char *ini, const char *log)
+void bf_set_files(const char *con, const char *log)
 {
-    lstrcpynA(g_ini, ini, MAX_PATH);
+    bf_settings_set_file(con);
     lstrcpynA(g_log, log, MAX_PATH);
 }
 
-/* the dinput8.dll proxy and the ASI: bf1942patch.ini / bf1942patch.log next to the DLL, then the patches. The log
+/* the dinput8.dll proxy and the ASI: bf1942patch.con / bf1942patch.log next to the DLL, then the patches. The log
  * is started afresh at a normal start; the copies the game starts of itself (+restart 1) add to it. */
 void bf_standalone_init(HINSTANCE dll)
 {
-    char ini[MAX_PATH], log[MAX_PATH + 16], exe[MAX_PATH], *slash;
+    char con[MAX_PATH], log[MAX_PATH + 16], exe[MAX_PATH], *slash;
     WIN32_FILE_ATTRIBUTE_DATA a;
     bf_set_module(dll);
     GetModuleFileNameA(NULL, exe, MAX_PATH);
@@ -357,19 +251,19 @@ void bf_standalone_init(HINSTANCE dll)
     if (!_stricmp(slash ? slash + 1 : exe, "rundll32.exe")) {
         return;   /* the restart helper: bf_restart_helper sets everything up itself */
     }
-    GetModuleFileNameA(dll, ini, MAX_PATH);
-    slash = strrchr(ini, '\\');
+    GetModuleFileNameA(dll, con, MAX_PATH);
+    slash = strrchr(con, '\\');
     if (slash) {
         slash[1] = '\0';
     }
-    strcpy(log, ini);
-    strcat(ini, "bf1942patch.ini");
+    strcpy(log, con);
+    strcat(con, "bf1942patch.con");
     strcat(log, "bf1942patch.log");
     if (!strstr(GetCommandLineA(), "+restart 1")
         || (GetFileAttributesExA(log, GetFileExInfoStandard, &a) && a.nFileSizeLow > 8u << 20)) {
         DeleteFileA(log);
     }
-    bf_set_files(ini, log);
+    bf_set_files(con, log);
     if (bf_patch_start()) {
         bf_install();
     }

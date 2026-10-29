@@ -1,0 +1,5 @@
+/* libbf1942patch.so interposes the server's sendto and exports nothing else */
+{
+    global: sendto;
+    local: *;
+};

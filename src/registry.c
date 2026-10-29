@@ -14,11 +14,11 @@
  *   HKLM\Software\Microsoft\Direct3D (0x80a4c0)                                     a D3DX debug switch
  *
  * The CD keys come from, first match wins:
- *   [CDKey] Key= / XPack1= / XPack2= in Settings.ini or bf1942patch.ini (Interposer: Plugins.Battlefield1942.Key ...)
+ *   bf1942patch.cdKey / cdKeyXPack1 / cdKeyXPack2 (bf1942patch.con, the console; Interposer: Config.yml)
  *   a file named cdkey (or cdkey.txt) in the save folder, then in the game folder: the key on the first line;
  *        lines XPack1=<key> / XPack2=<key> give the expansions their own keys
  * An expansion without a key of its own gets the main key. Everything the game writes stays in memory for the
- * session ([Registry] UseFile=0 hands the registry back to the game). */
+ * session (bf1942patch.noRegistry 0 hands the registry back to the game). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -208,7 +208,8 @@ static int find_cdkey(const char *pack, char *out, int size, const char **from)
 {
     const char *save = bf_save_dir();
     out[0] = '\0';
-    if (bf_ini_str("CDKey", pack[0] ? pack : "Key", out, size)) {
+    lstrcpynA(out, bf_setting_str(!pack[0] ? "cdKey" : !strcmp(pack, "XPack1") ? "cdKeyXPack1" : "cdKeyXPack2"), size);
+    if (out[0]) {
         trim(out);
         *from = "the settings";
         return out[0] != '\0';
@@ -246,13 +247,14 @@ static void install_values(void)
         } else if (packs[i].pack[0] && find_cdkey("", key, sizeof key, &from)) {
             bf_log("registry: %s uses the Battlefield 1942 CD key", packs[i].label);
         } else {
-            bf_log("registry: no %s CD key (put it in a file named cdkey in the game or save folder, or in [CDKey] Key=)",
+            bf_log("registry: no %s CD key (put it in a file named cdkey in the game or save folder, or in bf1942patch.cdKey)",
                    packs[i].label);
             continue;
         }
         set_string(create_key(packs[i].key), "", key);
     }
-    if (!bf_ini_str("Game", "Language", lang, sizeof lang)) {
+    lstrcpynA(lang, bf_setting_str("language"), sizeof lang);
+    if (!lang[0]) {
         strcpy(lang, "English");
     }
     set_string(create_key(INSTALL_KEY), "LANGUAGE", lang);
@@ -452,12 +454,12 @@ static LONG WINAPI hk_RegCloseKey(HKEY h)
 
 void bf_registry_install(void)
 {
-    if (!bf_ini_int("Registry", "UseFile", 1)) {
-        bf_log("registry: UseFile=0, the game uses the registry");
+    if (!bf_setting_int("noRegistry")) {
+        bf_log("registry: noRegistry 0, the game uses the registry");
         return;
     }
     InitializeCriticalSection(&g_cs);
-    g_log_calls = bf_ini_int("Registry", "LogAccess", 0);
+    bf_setting_bind("logRegistry", &g_log_calls);
     install_values();
     bf_hook_import("ADVAPI32.dll", "RegOpenKeyA", hk_RegOpenKeyA);
     bf_hook_import("ADVAPI32.dll", "RegOpenKeyExA", hk_RegOpenKeyExA);

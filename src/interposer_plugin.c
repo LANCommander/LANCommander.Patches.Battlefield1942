@@ -4,8 +4,9 @@
  * hooks are installed, and calls InterposerPluginInit with its module handle. With the Interposer
  * deployed as a proxy DLL (dinput.dll, version.dll) or through the injector's --launch mode this is
  * before BF1942.exe runs any of its own code. The same patches as the dinput8.dll proxy are applied;
- * settings come from Plugins.Battlefield1942 in .interposer\Config.yml (defaults are added on first run)
- * and log lines go to the Interposer's session log as [BF1942].
+ * the options come from bf1942patch.con next to BF1942.exe (if there is one), then from Plugins.Battlefield1942
+ * in .interposer\Config.yml (keyed by option name, e.g. borderless: 1; the defaults are added on first run),
+ * then the player's bf1942patch.con, and log lines go to the Interposer's session log as [BF1942].
  *
  * Interposer exports are __cdecl (declared without a convention in its config.h); only
  * InterposerPluginInit itself is WINAPI.
@@ -30,57 +31,8 @@ typedef BOOL (*InterposerSetConfigString_fn)(const wchar_t *dot_path, const wcha
 static InterposerLog_fn g_log;
 static InterposerGetConfigString_fn g_get_config;   /* NULL with Interposer builds that predate the fix */
 
-/* Written to Config.yml only when there is no Plugins.Battlefield1942 section yet; a missing key falls back
-   to the built-in default in the code, which is the same value. Key names are unique across the sections of
-   bf1942patch.ini, which they mirror. */
-static const wchar_t DEFAULTS[] =
-    L"Enabled: true\n"
-    L"Redirect: true\n"
-    L"Folder: \"\"\n"
-    L"LogFiles: 0\n"
-    L"UseFile: true\n"
-    L"LogAccess: false\n"
-    L"Key: \"\"\n"
-    L"XPack1: \"\"\n"
-    L"XPack2: \"\"\n"
-    L"Language: \"\"\n"
-    L"OpenSpy: true\n"
-    L"MasterServer: \"\"\n"
-    L"Borderless: true\n"
-    L"VSync: false\n"
-    L"Monitor: 0\n"
-    L"DpiAware: true\n"
-    L"ModeFallback: true\n"
-    L"NativeMenus: true\n"
-    L"Seamless: true\n"
-    L"HorPlus: true\n"
-    L"FixHud: true\n"
-    L"AnchorHud: true\n"
-    L"HudScale: 100\n"
-    L"HudScaleOption: true\n"
-    L"UseSDL: true\n"
-    L"Deadzone: 15\n"
-    L"Sensitivity: 100\n"
-    L"Bindings: true\n"
-    L"HideDuplicates: true\n"
-    L"StartKey: 0\n"
-    L"BackKey: 0\n"
-    L"VoiceChat: true\n"
-    L"VoicePort: 27800\n"
-    L"VoicePassword: \"\"\n"
-    L"VoiceServer: \"\"\n"
-    L"VoiceQueryPorts: \"22000,23000\"\n"
-    L"VoiceActivation: false\n"
-    L"RadioActivation: false\n"
-    L"ProximityKey: IDKey_Capital\n"
-    L"RadioKey: Mouse_IDButton_3\n"
-    L"VoiceVolume: 100\n"
-    L"MicSensitivity: 100\n"
-    L"VoiceHud: true\n"
-    L"VoiceOptions: true\n"
-    L"CrashLog: false\n";
 /* Plugins.Battlefield1942 from Config.yml, for Interposer builds whose InterposerGetConfigString is unusable */
-#define MAX_KEYS 64
+#define MAX_KEYS 128
 static struct { char key[48]; char value[MAX_PATH]; } g_keys[MAX_KEYS];
 static int g_nkeys;
 
@@ -182,38 +134,49 @@ static int get_value(const char *key, wchar_t *value, int size)
     return 0;
 }
 
-/* bf1942patch.ini's [Section] Key -> Plugins.Battlefield1942.Key (key names are unique across sections) */
-static int config_int(const char *section, const char *key, int def)
-{
-    wchar_t value[64];
-    wchar_t *end;
-    long n;
-    (void)section;
-    if (!get_value(key, value, sizeof value / sizeof value[0])) {
-        return def;
-    }
-    if (!_wcsicmp(value, L"true") || !_wcsicmp(value, L"yes") || !_wcsicmp(value, L"on")) {
-        return 1;
-    }
-    if (!_wcsicmp(value, L"false") || !_wcsicmp(value, L"no") || !_wcsicmp(value, L"off")) {
-        return 0;
-    }
-    n = wcstol(value, &end, 0);
-    if (end == value) {
-        bf_log("config: Plugins." SECTION ".%s = \"%ls\" is not a number or true/false, using %d", key, value, def);
-        return def;
-    }
-    return (int)n;
-}
-
-static int config_str(const char *section, const char *key, char *out, int size)
+/* Plugins.Battlefield1942.<option>, or the key bf1942patch.ini had (what older plugin versions wrote), for every
+ * option */
+static void load_config(void)
 {
     wchar_t value[MAX_PATH];
-    (void)section;
-    if (!get_value(key, value, MAX_PATH)) {
-        return 0;
+    char text[MAX_PATH];
+    int i, n = 0;
+    for (i = 0; i < bf_n_options; i++) {
+        if (!get_value(bf_options[i].name, value, MAX_PATH) && !get_value(bf_options[i].key, value, MAX_PATH)) {
+            continue;
+        }
+        if (!WideCharToMultiByte(CP_ACP, 0, value, -1, text, sizeof text, NULL, NULL)) {
+            continue;
+        }
+        if (bf_option_set(i, text) < 0) {
+            bf_log("config: Plugins." SECTION ".%s = \"%s\" is not a number or true/false, skipped", bf_options[i].name,
+                   text);
+        } else {
+            n++;
+        }
     }
-    return WideCharToMultiByte(CP_ACP, 0, value, -1, out, size, NULL, NULL) > 1;
+    bf_log("config: %d options from Plugins." SECTION, n);
+}
+
+/* written to Config.yml only when there is no Plugins.Battlefield1942 section yet: every option with its default */
+static wchar_t *defaults_yaml(void)
+{
+    size_t size = 64, used = 0;
+    wchar_t *yaml;
+    int i;
+    for (i = 0; i < bf_n_options; i++) {
+        size += strlen(bf_options[i].name) + (bf_options[i].def_str ? strlen(bf_options[i].def_str) : 12) + 8;
+    }
+    if (!(yaml = malloc(size * sizeof *yaml))) {
+        return NULL;
+    }
+    yaml[0] = L'\0';
+    for (i = 0; i < bf_n_options; i++) {
+        used += bf_options[i].type == BF_OPT_INT
+                    ? swprintf(yaml + used, size - used, L"%hs: %d\n", bf_options[i].name, bf_options[i].def)
+                    : swprintf(yaml + used, size - used, L"%hs: \"%hs\"\n", bf_options[i].name, bf_options[i].def_str);
+    }
+    return yaml;
 }
 
 static void log_line(const char *line)
@@ -230,11 +193,16 @@ __declspec(dllexport) void WINAPI InterposerPluginInit(HMODULE interposer)
     g_log = (InterposerLog_fn)(void (*)(void))GetProcAddress(interposer, "InterposerLog");
     register_config = (InterposerRegisterPluginConfig_fn)(void (*)(void))GetProcAddress(interposer, "InterposerRegisterPluginConfig");
     if (register_config) {
-        register_config(L"" SECTION, DEFAULTS);
+        wchar_t *yaml = defaults_yaml();
+        if (yaml) {
+            register_config(L"" SECTION, yaml);
+            free(yaml);
+        }
     }
     bf_set_module(GetModuleHandleA("LANCommander.Interposer.Plugin.Battlefield1942.dll"));
-    bf_set_backend(config_int, log_line);
-    bf_set_string_backend(config_str);
+    bf_voice_set_interposer(interposer);
+    bf_set_log_backend(log_line);
+    bf_settings_set_source(load_config);
 
     if (GetProcAddress(interposer, "InterposerSetConfigString")) {
         g_get_config = (InterposerGetConfigString_fn)(void (*)(void))GetProcAddress(interposer, "InterposerGetConfigString");

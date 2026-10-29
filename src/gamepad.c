@@ -51,7 +51,7 @@ static const GUID PAD_PRODUCT = { 0x42463432, 0x5041, 0x4401, { 0x80, 0x00, 0x42
 
 static int g_on;
 static int g_deadzone = 15;
-static float g_curve = 1.0f;          /* stick response exponent, from [Gamepad] Sensitivity */
+static float g_curve = 1.0f;          /* stick response exponent, from bf1942patch.gamepadSensitivity */
 static int g_hide_twins = 1;
 static int g_nslots;                  /* slots offered: the gamepads at start-up */
 static int g_start_key = 0x01;        /* DIK_ESCAPE: the in-game menu */
@@ -1305,24 +1305,40 @@ static HRESULT WINAPI hk_DirectInput8Create(HINSTANCE inst, DWORD ver, REFIID ii
     return hr;
 }
 
+/* the dead zone, the stick response and the keys Start / Back press (also when set in the console) */
+static int read_sticks(void)
+{
+    int sens = bf_setting_int("gamepadSensitivity");
+    g_deadzone = bf_setting_int("gamepadDeadzone");
+    g_deadzone = g_deadzone < 0 ? 0 : g_deadzone > 90 ? 90 : g_deadzone;
+    sens = sens < 0 ? 0 : sens > 100 ? 100 : sens;
+    g_curve = 3.0f - 2.0f * sens / 100.0f;   /* 100 = linear, 50 = squared, 0 = cubed */
+    g_start_key = bf_setting_int("gamepadStartKey");
+    g_back_key = bf_setting_int("gamepadBackKey");
+    return sens;
+}
+
+static void sticks_changed(void)
+{
+    read_sticks();
+}
+
 void bf_gamepad_install(void)
 {
     int sens;
     char self[MAX_PATH], *base;
-    if (!bf_ini_int("Gamepad", "UseSDL", 1)) {
-        bf_log("gamepad: UseSDL=0, no SDL gamepads");
+    if (!bf_setting_int("gamepad")) {
+        bf_log("gamepad: gamepad 0, no SDL gamepads");
         return;
     }
     g_on = 1;
-    g_deadzone = bf_ini_int("Gamepad", "Deadzone", 15);
-    g_deadzone = g_deadzone < 0 ? 0 : g_deadzone > 90 ? 90 : g_deadzone;
-    sens = bf_ini_int("Gamepad", "Sensitivity", 100);
-    sens = sens < 0 ? 0 : sens > 100 ? 100 : sens;
-    g_curve = 3.0f - 2.0f * sens / 100.0f;   /* 100 = linear, 50 = squared, 0 = cubed */
-    g_hide_twins = bf_ini_int("Gamepad", "HideDuplicates", 1);
-    g_start_key = bf_ini_int("Gamepad", "StartKey", 0);
-    g_back_key = bf_ini_int("Gamepad", "BackKey", 0);
-    g_bindings = bf_ini_int("Gamepad", "Bindings", 1);
+    sens = read_sticks();
+    bf_setting_watch("gamepadDeadzone", sticks_changed);
+    bf_setting_watch("gamepadSensitivity", sticks_changed);
+    bf_setting_watch("gamepadStartKey", sticks_changed);
+    bf_setting_watch("gamepadBackKey", sticks_changed);
+    g_hide_twins = bf_setting_int("gamepadHideDuplicates");
+    g_bindings = bf_setting_int("gamepadBindings");
     if (g_bindings) {
         static const BYTE orig[10] = {0x8d, 0x4c, 0x24, 0x50, 0xff, 0x15, 0x1c, 0x31, 0x8c, 0x00};
         memcpy(&bf_gamepad_dtor_slot, orig + 6, 4);

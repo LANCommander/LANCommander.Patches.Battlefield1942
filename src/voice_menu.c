@@ -18,7 +18,7 @@
  *   - a literal label (in place of the BfLocaleStringData 0x2f91).
  * Under them, two copies of menu/SoundOptionsPage1's MUSIC row (a check box, opened as the donor) at y 135 / 160:
  * VOICE ACTIVATION: NEARBY / RADIO on Options/Controls/Voice/NearbyActivation / RadioActivation, bound here.
- * 0x6c6040 is detoured: while Capture is set, the key goes to voice (kept in Settings.ini) and the game's own
+ * 0x6c6040 is detoured: while Capture is set, the key goes to voice (kept in the player's bf1942patch.con) and the game's own
  * bindings are not touched. Escape (an empty key) leaves the action without a key, as for the game's. Joystick
  * buttons and axes are refused (the page keeps waiting).
  *
@@ -26,7 +26,11 @@
  * page 1's MASTER VOLUME row (content 0x23ad: a number box, "%", a slider), opened through the game's opener as the
  * donor: VOICE CHAT VOLUME on Options/Sound/VoiceVolume and MIC SENSITIVITY on Options/Sound/MicSensitivity, 0..200
  * (the box's range at 0x24c8, the slider's at 0x2608), bound by SoundOptions::registerVariables (0x6b2ce0, vtable
- * slot 0x91e5c0). voice.c applies them as they move. */
+ * slot 0x91e5c0). voice.c applies them as they move.
+ *
+ * The microphone. menu/SoundOptionsPage1 gets MICROPHONE in place of DISABLE ALL SOUND: one more copy of the VOTE NO
+ * key row, its button widened to show the device's name. A click sets Options/Sound/Voice/NextMicrophone, and the
+ * next voice tick steps to the next device. */
 #include <string.h>
 #include "voice.h"
 
@@ -157,11 +161,73 @@ const bf_meme_graft bf_voice_sound_graft = {
     .rows = SOUND_ROWS, .n_rows = sizeof SOUND_ROWS / sizeof SOUND_ROWS[0],
 };
 
+/* ---------------------------------------------------------------- menu/SoundOptionsPage1: the microphone */
+
+/* DISABLE ALL SOUND is the content of the page's outermost row (0x765, box 5 40 360 20); that row is moved out of
+ * sight, and a copy of menu/CommonControlsPage3's VOTE NO row (as for the keys) takes its place, hung on the NULL next
+ * of the SOUND DETAIL row (0x78d), the innermost of the chain. Its key button is widened (the boxes of 0x2241, 0x28ec,
+ * 0x28f4, 0x28fc) to show the device's name, Options/Sound/Voice/Microphone; its click sets
+ * Options/Sound/Voice/NextMicrophone = 1 (voice steps to the next device). The Controls page's variables it also
+ * sets (the conflict text's place, WaitForKey, ...) become Options/Sound/Voice/Unused (an int) and UnusedFlag. */
+static const DWORD MIC_ANCESTORS[] = {0x505, 0x765, 0x76d, 0x775, 0x77d, 0x785, 0x78d};
+#define UNUSED     "Options/Sound/Voice/Unused"
+#define UNUSED_FLAG "Options/Sound/Voice/UnusedFlag"
+static const bf_meme_edit SOUND_MIC_EDITS[] = {
+    {0x2249, NULL, BF_MEME_NULL, NULL, 0, NULL, 0},                       /* the alternate button */
+    {0x2934, "Options/Controls/Conflict/MouseOverPrimary", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x2971, "Options/Controls/Conflict/ConflictX", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x298d, "Options/Controls/Conflict/ConflictY", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x29a9, "Options/Controls/Conflict/MouseOverPrimary", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x29b5, VOTE_NO, BF_MEME_INT, NULL, -1, NULL, 0},
+    {0x29e6, "Options/Controls/WaitForKey", BF_MEME_BOOL, UNUSED_FLAG, 0, NULL, 0},
+    {0x2a00, "Options/Controls/Alternate", BF_MEME_BOOL, UNUSED_FLAG, 0, NULL, 0},
+    {0x2a1a, "Options/Controls/Key/DefineKeyX", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x2a36, "Options/Controls/Key/DefineKeyY", BF_MEME_INT, UNUSED, 0, NULL, 0},
+    {0x2a52, "Options/Controls/Key/ActiveKey", BF_MEME_INT, "Options/Sound/Voice/NextMicrophone", 0, NULL, 0},
+    {0x2a5e, VOTE_NO, BF_MEME_INT, NULL, 1, NULL, 0},                     /* click: NextMicrophone = 1 */
+    {0x2aa3, NULL, BF_MEME_WSTRING, "Options/Sound/Voice/Microphone", 0, NULL, 0},
+    {0x2f91, NULL, BF_MEME_STRING, NULL, 0, "MICROPHONE", 0},
+};
+static const float MIC_AT[4] = {180, 0, 90, 19}, MIC_NEW_AT[4] = {110, 0, 250, 19};
+static const float MIC_BOX[4] = {0, 0, 90, 19}, MIC_NEW_BOX[4] = {0, 0, 250, 19};
+static const float MIC_FILL[4] = {1, 1, 88, 17}, MIC_NEW_FILL[4] = {1, 1, 248, 17};
+static const float MIC_TEXT[4] = {0, 4, 90, 20}, MIC_NEW_TEXT[4] = {0, 4, 250, 20};
+static const bf_meme_bytes MIC_BYTES[] = {
+    {0x28dc, 16, MIC_AT, MIC_NEW_AT},
+    {0x2a83, 16, MIC_TEXT, MIC_NEW_TEXT},
+    {0x2eef, 16, MIC_FILL, MIC_NEW_FILL},
+    {0x2f30, 16, MIC_BOX, MIC_NEW_BOX},
+};
+static const bf_meme_graft_row MIC_ROWS[] = {
+    {{5, 40, 360, 20}, SOUND_MIC_EDITS, sizeof SOUND_MIC_EDITS / sizeof SOUND_MIC_EDITS[0], MIC_BYTES,
+     sizeof MIC_BYTES / sizeof MIC_BYTES[0], NULL},
+};
+static const float DISABLE_ALL[4] = {5, 40, 360, 20}, HIDDEN[4] = {-4096, -4096, 360, 20};
+static const bf_meme_bytes MIC_PAGE_BYTES[] = {
+    {0x2715, 16, DISABLE_ALL, HIDDEN},                     /* DISABLE ALL SOUND's row */
+};
+const bf_meme_graft bf_voice_mic_graft = {
+    .size = 10684, .strings_end = 0x502,
+    .hang_at = 0x795,                                  /* after SOUND DETAIL */
+    .ancestors = MIC_ANCESTORS, .n_ancestors = sizeof MIC_ANCESTORS / sizeof MIC_ANCESTORS[0],
+    .donor = "CommonControlsPage3", .donor_size = 19317, .donor_strings_end = 0x1f94,
+    .content = 0x2239, .content_len = 0xdb2,           /* VOTE NO */
+    .nodes = KEYS_NODES, .n_nodes = sizeof KEYS_NODES / sizeof KEYS_NODES[0],
+    .rows = MIC_ROWS, .n_rows = sizeof MIC_ROWS / sizeof MIC_ROWS[0],
+    .bytes = MIC_PAGE_BYTES, .n_bytes = sizeof MIC_PAGE_BYTES / sizeof MIC_PAGE_BYTES[0],
+};
+
 /* ---------------------------------------------------------------- the variables */
 
 static BYTE *g_controls;             /* the Controls page */
 static void *g_key_node[2];          /* its Options/Controls/Voice/ProximityKey, RadioKey */
 static int g_capture;                /* Options/Controls/Voice/Capture: 1 nearby, 2 radio (set by the rows' buttons) */
+static void *g_sound;                /* the Sound options */
+static void *g_mic_node;             /* their Options/Sound/Voice/Microphone */
+static int g_mic_shown;              /* its text is the device's (the device list needs the library) */
+static int g_next_mic;               /* Options/Sound/Voice/NextMicrophone: the row was clicked */
+static int g_unused;                 /* Options/Sound/Voice/Unused, UnusedFlag: what the copied button sets */
+static unsigned char g_unused_flag;
 
 /* the key's name as the Controls menu shows it */
 static void key_name(void *page, const char *key, wchar_t *out, int size)
@@ -196,9 +262,17 @@ static int __attribute__((thiscall)) hk_controls_vars(BYTE *page)
 
 static int __attribute__((thiscall)) hk_sound_vars(void *page)
 {
+    wchar_t text[64];
     int r = ((int (__attribute__((thiscall)) *)(void *))BF_ADDR(SOUND_VARS))(page);
+    g_sound = page;
     bf_menu_bind_int(page, "Options/Sound", "VoiceVolume", &bf_voice_volume);
     bf_menu_bind_int(page, "Options/Sound", "MicSensitivity", &bf_voice_mic);
+    bf_menu_bind_int(page, "Options/Sound/Voice", "NextMicrophone", &g_next_mic);
+    bf_menu_bind_int(page, "Options/Sound/Voice", "Unused", &g_unused);
+    bf_meme_bind(*(void **)((BYTE *)page + 4), "Options/Sound/Voice", "UnusedFlag", BF_MENU_BOOL, &g_unused_flag);
+    bf_voice_mic_text(text, 64);
+    g_mic_node = bf_menu_bind_wstring(page, "Options/Sound/Voice", "Microphone", text);
+    g_mic_shown = 0;
     return r;
 }
 
@@ -235,9 +309,21 @@ static void __attribute__((thiscall)) hk_assign(BYTE *page, bf_msvc_string shown
     bf_wstring_free(&shown);
 }
 
-/* a capture the page gave up without a key (the menu was left) */
+/* the MICROPHONE row's click, and its text once the library is up (the Sound options are bound before it loads); a
+ * capture the Controls page gave up without a key (the menu was left) */
 void bf_voice_menu_tick(void)
 {
+    wchar_t text[64];
+    if (g_next_mic) {
+        g_next_mic = 0;
+        bf_voice_next_mic();
+        g_mic_shown = 0;
+    }
+    if (g_mic_node && !g_mic_shown) {
+        g_mic_shown = 1;
+        bf_voice_mic_text(text, 64);
+        bf_menu_set_wstring(g_sound, g_mic_node, text);
+    }
     if (g_capture && g_controls && !IsBadReadPtr(g_controls + PAGE_WAITING, 1) && !g_controls[PAGE_WAITING]) {
         g_capture = 0;
     }
@@ -247,8 +333,8 @@ void bf_voice_menu_install(void)
 {
     static const BYTE assign_head[7] = {0x8a, 0x44, 0x24, 0x3c, 0x83, 0xec, 0x38};   /* mov al,[esp+0x3c]; sub esp,0x38 */
     static const BYTE name_head[6] = {0x81, 0xec, 0x90, 0x00, 0x00, 0x00};           /* sub esp, 0x90 */
-    if (!bf_ini_int("Voice", "VoiceOptions", 1)) {
-        bf_log("voice: VoiceOptions=0, the keys and volumes are only in the settings");
+    if (!bf_setting_int("voiceOptions")) {
+        bf_log("voice: voiceOptions 0, the keys and volumes are only in the settings");
         return;
     }
     if (*(DWORD *)BF_ADDR(CONTROLS_VARS_SLOT) != CONTROLS_VARS || !bf_expect(KEY_NAME, name_head, sizeof name_head)
@@ -259,8 +345,9 @@ void bf_voice_menu_install(void)
         bf_hook_slot(CONTROLS_VARS_SLOT, CONTROLS_VARS, hk_controls_vars);
     }
     if (*(DWORD *)BF_ADDR(SOUND_VARS_SLOT) != SOUND_VARS
-        || !bf_menu_graft("SoundOptionsPage2", &bf_voice_sound_graft, "the voice volume and microphone rows")) {
-        bf_log("voice: the Sound options code differs, the voice volumes are only in the settings");
+        || !bf_menu_graft("SoundOptionsPage2", &bf_voice_sound_graft, "the voice volume and microphone rows")
+        || !bf_menu_graft("SoundOptionsPage1", &bf_voice_mic_graft, "the microphone row")) {
+        bf_log("voice: the Sound options code differs, the voice volumes and the microphone are only in the settings");
     } else {
         bf_hook_slot(SOUND_VARS_SLOT, SOUND_VARS, hk_sound_vars);
     }

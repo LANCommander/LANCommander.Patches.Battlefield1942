@@ -16,7 +16,7 @@
  *     picture up until the new copy has shown its first frames (signalled through the event named in the
  *     environment variable BF1942PATCH_READY), then hands it the foreground;
  *   - nothing waits on fixed sleeps any more, nothing touches the display mode (with window.c) or the registry.
- * [Restart] Seamless=0 turns this off. */
+ * bf1942patch.seamlessRestart 0 turns this off. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -341,7 +341,7 @@ __declspec(dllexport) void CALLBACK bf_restart_helper(HWND hwnd, HINSTANCE inst,
         return;
     }
     bf_set_game_dir(game);
-    snprintf(ini, sizeof ini, "%sbf1942patch.ini", game);
+    snprintf(ini, sizeof ini, "%sbf1942patch.con", game);
     if (!strcmp(log, "-")) {
         snprintf(log, sizeof log, "%sbf1942patch.log", game);
     }
@@ -433,8 +433,8 @@ void bf_restart_install(void)
         g_ready[0] = '\0';
     }
 
-    if (!bf_ini_int("Restart", "Seamless", 1)) {
-        bf_log("restart: Seamless=0, the game restarts itself the original way");
+    if (!bf_setting_int("seamlessRestart")) {
+        bf_log("restart: seamlessRestart 0, the game restarts itself the original way");
         return;
     }
     if (!bf_expect(RESTART_FN, entry, sizeof entry)) {

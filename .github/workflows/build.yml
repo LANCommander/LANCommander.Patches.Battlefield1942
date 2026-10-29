@@ -1,6 +1,6 @@
 # Builds on every push and pull request. A semver tag (v1.2.3, v1.2.3-rc.1) also queues up a draft GitHub
-# release with the three packages attached (dinput8.dll, ASI, LANCommander Interposer plugin); publish it from
-# the Releases page.
+# release with the four packages attached (dinput8.dll, ASI, LANCommander Interposer plugin, Linux dedicated
+# server); publish it from the Releases page.
 name: Build
 
 on:
@@ -44,20 +44,20 @@ jobs:
 
       - name: Package
         env:
-          COMMS_DLL_URL: ${{ vars.COMMS_DLL_URL }}
+          INTERPOSER_DLL_URL: ${{ vars.INTERPOSER_DLL_URL }}
         run: |
           mkdir -p out/dinput8/bf1942patch out/asi/bf1942patch out/interposer/.interposer/Plugins out/interposer/bf1942patch
-          cp build/dinput8.dll dist/bf1942patch.ini out/dinput8/
-          cp build/bf1942patch.asi dist/bf1942patch.ini out/asi/
+          cp build/dinput8.dll dist/bf1942patch.con out/dinput8/
+          cp build/bf1942patch.asi dist/bf1942patch.con out/asi/
           cp build/LANCommander.Interposer.Plugin.Battlefield1942.dll out/interposer/.interposer/Plugins/
-          # the voice library (LANCommander.Comms.dll, 32-bit), if the repository says where to get it
-          if [ -n "$COMMS_DLL_URL" ]; then
-            curl -fsSL "$COMMS_DLL_URL" -o LANCommander.Comms.dll
+          # the voice library (LANCommander.Interposer.dll, 32-bit), if the repository says where to get it; the
+          # Interposer plugin package runs in the Interposer already
+          if [ -n "$INTERPOSER_DLL_URL" ]; then
+            curl -fsSL "$INTERPOSER_DLL_URL" -o LANCommander.Interposer.dll
+            cp LANCommander.Interposer.dll out/dinput8/bf1942patch/
+            cp LANCommander.Interposer.dll out/asi/bf1942patch/
           fi
           for d in dinput8 asi interposer; do
-            if [ -f LANCommander.Comms.dll ]; then
-              cp LANCommander.Comms.dll out/$d/bf1942patch/
-            fi
             cp LICENSE out/$d/bf1942patch/LICENSE.txt
             cp README.md out/$d/bf1942patch/README.md
             cp dist/cdkey.example out/$d/bf1942patch/cdkey.example
@@ -71,12 +71,57 @@ jobs:
           name: bf1942patch-${{ env.VERSION }}
           path: out/*.zip
 
-      - name: Draft release
-        if: startsWith(github.ref, 'refs/tags/')
+  # the Linux dedicated server's libbf1942patch.so, on Debian 12 (the LANCommander server images' glibc)
+  linux:
+    runs-on: ubuntu-latest
+    container: debian:12
+    steps:
+      - name: Tools
+        run: apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc-multilib libc6-dev-i386 curl ca-certificates git > /dev/null
+
+      - uses: actions/checkout@v4
+
+      - name: Version
         shell: bash
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: BF_VERSION="$VERSION" sh build-linux.sh
+
+      - name: Package
+        env:
+          INTERPOSER_SO_URL: ${{ vars.INTERPOSER_SO_URL }}
+        run: |
+          mkdir -p out/linux
+          cp build/linux/libbf1942patch.so build/linux/start-with-bf1942patch.sh dist/bf1942patch.con LICENSE README.md out/linux/
+          # the voice library (libLANCommander.Interposer.so, 32-bit), if the repository says where to get it
+          if [ -n "$INTERPOSER_SO_URL" ]; then
+            curl -fsSL "$INTERPOSER_SO_URL" -o out/linux/libLANCommander.Interposer.so
+          fi
+          tar -czf "out/bf1942patch-$VERSION-linux-server.tar.gz" -C out/linux .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bf1942patch-linux-${{ env.VERSION }}
+          path: out/*.tar.gz
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           flags="--draft"
           case "$GITHUB_REF_NAME" in *-*) flags="$flags --prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" out/*.zip --title "$GITHUB_REF_NAME" --generate-notes $flags
+          gh release create "$GITHUB_REF_NAME" out/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" \
+            --generate-notes $flags

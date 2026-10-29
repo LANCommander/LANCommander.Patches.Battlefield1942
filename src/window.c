@@ -1,4 +1,4 @@
-/* [Display] Borderless=1: the game in a borderless window that covers its monitor instead of exclusive full screen.
+/* bf1942patch.borderless 1: the game in a borderless window that covers its monitor instead of exclusive full screen.
  * The desktop resolution never changes, alt-tab is instant, and the restarts the game does for every map (restart.c)
  * no longer switch the display mode back and forth.
  *
@@ -26,7 +26,7 @@ HWND bf_game_window(void)
     return g_window;
 }
 
-/* the monitor of the game window (the primary one before it exists, or [Display] Monitor=<n>, from 1) */
+/* the monitor of the game window (the primary one before it exists, or bf1942patch.monitor <n>, from 1) */
 void bf_game_monitor(RECT *r)
 {
     MONITORINFO mi;
@@ -35,7 +35,7 @@ void bf_game_monitor(RECT *r)
     if (g_window) {
         mon = MonitorFromWindow(g_window, MONITOR_DEFAULTTOPRIMARY);
     } else {
-        int want = bf_ini_int("Display", "Monitor", 0);
+        int want = bf_setting_int("monitor");
         DISPLAY_DEVICEA dd;
         DWORD i;
         int n = 0;
@@ -240,12 +240,12 @@ static void log_window(void *device, const bf_present_params *pp, int reset)
 
 void bf_window_install(void)
 {
-    if (bf_ini_int("Display", "DpiAware", 1)) {
+    if (bf_setting_int("dpiAware")) {
         bf_dpi_aware();
     }
-    g_borderless = bf_ini_int("Display", "Borderless", 1);
+    g_borderless = bf_setting_int("borderless");
     real_CreateWindowExA = bf_hook_import("USER32.dll", "CreateWindowExA", hk_CreateWindowExA);
-    if (bf_ini_int("Display", "ModeFallback", 1)) {
+    if (bf_setting_int("modeFallback")) {
         bf_redirect_call(MODE_FIND_AT_1, MODE_FIND, (void *)hk_mode_find);
         bf_redirect_call(MODE_FIND_AT_2, MODE_FIND, (void *)hk_mode_find);
     }
@@ -258,13 +258,13 @@ void bf_window_install(void)
         static const BYTE full[10] = {0x90, 0x90, 0xc7, 0x44, 0x24, 0x04, 0x01, 0x00, 0x00, 0x00};
         bf_redirect_call(MODE_ACCEPT, MODE_ACCEPT_FN, (void *)hk_mode_accept);
         bf_patch(FULLSCREEN_FORCE, orig, full, sizeof orig);
-        g_native_menus = bf_ini_int("Display", "NativeMenus", 1);
+        g_native_menus = bf_setting_int("nativeMenus");
     }
     if (!g_borderless) {
-        bf_log("window: Borderless=0, the game picks full screen or window itself");
+        bf_log("window: borderless 0, the game picks full screen or window itself");
         return;
     }
-    g_vsync = bf_ini_int("Display", "VSync", 0);
+    g_vsync = bf_setting_int("vsync");
     real_SetWindowPos = bf_hook_import("USER32.dll", "SetWindowPos", hk_SetWindowPos);
     real_ChangeDisplaySettingsA = bf_hook_import("USER32.dll", "ChangeDisplaySettingsA", hk_ChangeDisplaySettingsA);
     bf_d3d_install();

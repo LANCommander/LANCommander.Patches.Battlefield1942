@@ -6,7 +6,7 @@
  * retail exe names master.gamespy.com; the community builds patched in master.bf1942.sk or master.bf1942.org.
  * Every name goes through WSOCK32!gethostbyname (the exe's IAT slot 0x8c3680, also behind the thunk at 0x8050f6),
  * so that one import is hooked:
- *   master.gamespy.com, master.bf1942.sk, master.bf1942.org   -> [Network] MasterServer (master.openspy.net)
+ *   master.gamespy.com, master.bf1942.sk, master.bf1942.org   -> bf1942patch.masterServer (master.openspy.net)
  *   anything else under gamespy.com                           -> the same name under openspy.net
  * OpenSpy speaks the old GameSpy protocols and knows the game (bfield1942), so nothing else changes. */
 #include <stdio.h>
@@ -62,11 +62,12 @@ static struct hostent *WINAPI hk_gethostbyname(const char *name)
 
 void bf_master_install(void)
 {
-    if (!bf_ini_int("Network", "OpenSpy", 1)) {
-        bf_log("master: OpenSpy=0, the game's own master server names are used");
+    if (!bf_setting_int("openSpy")) {
+        bf_log("master: openSpy 0, the game's own master server names are used");
         return;
     }
-    if (!bf_ini_str("Network", "MasterServer", g_master, sizeof g_master)) {
+    lstrcpynA(g_master, bf_setting_str("masterServer"), sizeof g_master);
+    if (!g_master[0]) {
         strcpy(g_master, "master.openspy.net");
     }
     real_gethostbyname = bf_hook_import("WSOCK32.dll", "gethostbyname", hk_gethostbyname);

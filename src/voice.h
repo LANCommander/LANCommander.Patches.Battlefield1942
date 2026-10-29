@@ -25,16 +25,30 @@ typedef struct {
 
 const bf_voice_state *bf_voice_now(void);
 
+/* the Interposer with the voice API, loaded (on the game thread) the first time; NULL without one */
+HMODULE bf_voice_library(void);
+
 /* the push-to-talk keys, as the game names them (IDKey_Capital, Mouse_IDButton_3) */
 enum { BF_VOICE_NEARBY, BF_VOICE_RADIO };
 const char *bf_voice_key(int which);
-void bf_voice_set_key(int which, const char *name);   /* "" = none; kept in Settings.ini */
+void bf_voice_set_key(int which, const char *name);   /* "" = none; kept in the player's bf1942patch.con */
 int bf_voice_vk(const char *name);   /* the virtual key that is held for a game key name, 0 if there is none */
 
 /* the Sound options sliders, in percent, and the Controls options' voice activation check boxes (nearby, radio):
  * bound to the menus, read every frame */
 extern int bf_voice_volume, bf_voice_mic;
 extern unsigned char bf_voice_va[2];
+
+/* the microphone (bf1942patch.inputDevice): its name as the Controls options show it, and the next one (after the last
+ * one the default), applied at once and kept in the player's bf1942patch.con; on the game thread */
+void bf_voice_mic_text(wchar_t *out, int size);
+void bf_voice_next_mic(void);
+
+/* muting other players, by the game's name (kept with the profile, VoiceMuteList.con) */
+int bf_voice_running(void);          /* the voice client is up */
+int bf_voice_player(int id, char *name, int size);   /* the name of the game's player id, if one that can be muted */
+int bf_voice_muted(const char *name);
+void bf_voice_set_muted(const char *name, int muted);
 
 /* ---------------------------------------------------------------- voice_net.c */
 
@@ -54,10 +68,11 @@ void bf_voice_query_cancel(void);
 int bf_voice_query_active(void);
 const char *bf_voice_query_address(void);     /* the host's address once resolved, else "" */
 
-/* ---------------------------------------------------------------- voice_hud.c, voice_menu.c */
+/* ---------------------------------------------------------------- voice_hud.c, voice_menu.c, voice_scoreboard.c */
 
 void bf_voice_hud_install(void);
 void bf_voice_hud_update(const bf_voice_state *s);   /* every frame, on the game thread */
 void bf_voice_menu_install(void);
 void bf_voice_menu_tick(void);
+void bf_voice_scoreboard_install(void);
 #endif

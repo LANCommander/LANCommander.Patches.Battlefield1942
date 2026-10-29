@@ -5,7 +5,8 @@
  *   object of our own, laid out like the game's (vtable copied from game.setMinimapTransparency at 0x91fca0, invoke
  *   at +0x40 and isActive at +0x44 replaced), handed to ConsoleObjects::registerList (0x5ac970, registry 0x9ab610)
  *   right after the menu module registers its own commands (its vtable slot 0x8d2148 -> 0x6b4d80, before any .con
- *   file runs).
+ *   file runs). Every option is added the same way (bf_console_add, settings_game.c): a property like hudScale, and
+ *   the other modules add methods taking a std::string like game.addPlayerToBuddyListByName (0x418480).
  * - The profile: SaveGeneralOptions (0x6d5a20) rewrites Settings/Profiles/<profile>/GeneralOptions.con from the
  *   page's fields; its last line is written by the call at 0x6d61d4 (FileHandle::write 0x5839f0). That call is
  *   redirected to write "bf1942patch.hudScale <n>" after it, so the value is saved with the profile and runs with
@@ -16,7 +17,7 @@
  *   splice relies on is checked first; any other version of the file is left alone. The variable is bound to the
  *   patch's own int by GeneralOptions::registerVariables (0x6d4d10, vtable slot 0x923968), which runs before the
  *   page loads, through bindInt (0x69eb50). The slider writes the int as it moves, so the HUD follows live.
- * The starting value is [Widescreen] HudScale (default 100); a profile's saved value wins.
+ * The starting value is bf1942patch.hudScale from bf1942patch.con (default 100); a profile's saved value wins.
  *
  * The other modules add rows to the options pages the same way: bf_menu_add_row (one copied row, framerate.c), and
  * bf_menu_graft (voice_menu.c) for rows copied from another page (opened through the original opener as the donor
@@ -25,7 +26,9 @@
  * with its class, so the copy's string indices (class names and variables) are moved to the page's table, which
  * gets the names it lacks at its end, and the nodes around a replaced one get its new size. Text variables are
  * bound by bindWstring (0x69b8f0, like bindInt) and changed through their data node (vtable +0x50, set(manager,
- * text)). */
+ * text)). A page can take several grafts (voice_hud.c and voice_scoreboard.c both graft menu/InGame): they are
+ * worked out on the file as shipped and spliced in together, each chain in place of its own NULL next. A graft can
+ * also change bytes of the page itself in place (voice_scoreboard.c moves two of the game's buttons out of sight). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +54,12 @@ static void set_scale(int pct)
     g_hud_scale = pct;
 }
 
+/* bf1942patch.hudScale <percent>, in the console or the profile's GeneralOptions.con */
+static void hud_scale_changed(void)
+{
+    set_scale(g_hud_scale);
+}
+
 /* ---------------------------------------------------------------- the console command */
 
 #define REGISTRY        0x9ab610u
@@ -59,21 +68,34 @@ static void set_scale(int pct)
 #define MENU_REGISTER_SLOT 0x8d2148u /* menu module "register console objects" -> 0x6b4d80 */
 #define MENU_REGISTER   0x6b4d80u
 
-static BYTE g_cmd[0xb0];             /* the method object */
+#define MAX_COMMANDS    96
+#define MAX_ARGS        8
+#define STD_STRING      28           /* sizeof std::string: argv is an array of them */
+
+static struct command {
+    BYTE obj[0xb0];                  /* the method object (first: the console hands it back as self) */
+    bf_console_fn fn;
+} g_cmds[MAX_COMMANDS];
+static int g_ncmds;
 static void *g_cmd_vtbl[25];
-static struct node { struct node *next, *prev; void *value; } g_sentinel, g_elem;
+static struct node { struct node *next, *prev; void *value; } g_sentinel, g_elems[MAX_COMMANDS];
 static struct { DWORD alloc; struct node *head; DWORD size; } g_list;
 
 /* invoke(std::string *ret, const std::string *argv, int argc): ret is what the console prints */
 static void *__attribute__((thiscall)) cmd_invoke(void *self, void *ret, const BYTE *argv, int argc)
 {
-    char text[16];
-    (void)self;
-    if (argc >= 1) {
-        set_scale(atoi(bf_string_chars(argv)));
-        text[0] = '\0';
-    } else {
-        snprintf(text, sizeof text, "%d", bf_hud_scale());
+    const char *args[MAX_ARGS];
+    char text[320];
+    int i;
+    text[0] = '\0';
+    argc = argc < 0 ? 0 : argc > MAX_ARGS ? MAX_ARGS : argc;
+    for (i = 0; i < argc; i++) {
+        args[i] = bf_string_chars(argv + i * STD_STRING);
+    }
+    for (i = 0; i < g_ncmds; i++) {
+        if (self == g_cmds[i].obj) {
+            g_cmds[i].fn(*(const char **)(g_cmds[i].obj + 0x0c), argc, args, text, sizeof text);
+        }
     }
     bf_string_init(ret, text);
     return ret;
@@ -91,12 +113,14 @@ static char __attribute__((thiscall)) cmd_none(void *self)
     return 0;
 }
 
-static void register_command(void)
+/* every command added, in one list */
+static void register_commands(void)
 {
     static int done;
     void **tmpl = (void **)BF_ADDR(METHOD_VTBL);
+    struct node *prev = &g_sentinel;
     int i;
-    if (done) {
+    if (done || !g_ncmds) {
         return;
     }
     done = 1;
@@ -108,31 +132,53 @@ static void register_command(void)
     g_cmd_vtbl[0x48 / 4] = (void *)cmd_none;   /* execute / getResult / parseArg: the invoke above does it all */
     g_cmd_vtbl[0x4c / 4] = (void *)cmd_none;
     g_cmd_vtbl[0x50 / 4] = (void *)cmd_none;
-    *(void ***)(g_cmd + 0x00) = g_cmd_vtbl;
-    *(DWORD *)(g_cmd + 0x04) = 1;                       /* a property: no argument reads it */
-    *(const char **)(g_cmd + 0x08) = "bf1942patch";
-    *(const char **)(g_cmd + 0x0c) = "hudScale";
-    *(DWORD *)(g_cmd + 0x10) = 3;                       /* typed in the console and run from .con files */
-    *(DWORD *)(g_cmd + 0x14) = 0;
-    *(DWORD *)(g_cmd + 0x18) = 1;
-    *(const char **)(g_cmd + 0x4c) = "std::string";
-    *(const char **)(g_cmd + 0x50) = "int";
-    *(DWORD *)(g_cmd + 0x78) = 0;
-    g_cmd[0xa1] = 1;
-    g_elem.value = g_cmd;
-    g_sentinel.next = g_sentinel.prev = &g_elem;
-    g_elem.next = g_elem.prev = &g_sentinel;
+    for (i = 0; i < g_ncmds; i++) {
+        BYTE *c = g_cmds[i].obj;
+        *(void ***)(c + 0x00) = g_cmd_vtbl;
+        g_elems[i].value = c;
+        g_elems[i].prev = prev;
+        prev->next = &g_elems[i];
+        prev = &g_elems[i];
+    }
+    prev->next = &g_sentinel;
+    g_sentinel.prev = prev;
     g_list.head = &g_sentinel;
-    g_list.size = 1;
+    g_list.size = (DWORD)g_ncmds;
     ((char (__attribute__((thiscall)) *)(void *, void *))BF_ADDR(REGISTER_LIST))(BF_ADDR(REGISTRY), &g_list);
-    bf_log("menu: console command bf1942patch.hudScale registered");
+    for (i = 0; i < g_ncmds; i++) {
+        bf_log("menu: console command bf1942patch.%s registered", *(const char **)(g_cmds[i].obj + 0x0c));
+    }
 }
 
 static char __attribute__((thiscall)) hk_menu_register(void *module)
 {
     char r = ((char (__attribute__((thiscall)) *)(void *))BF_ADDR(MENU_REGISTER))(module);
-    register_command();
+    register_commands();
     return r;
+}
+
+int bf_console_add(const char *name, int kind, bf_console_fn fn)
+{
+    static int hooked;
+    int property = kind != BF_CONSOLE_METHOD;
+    BYTE *c;
+    if (g_ncmds == MAX_COMMANDS
+        || (!hooked && !(hooked = bf_hook_slot(MENU_REGISTER_SLOT, MENU_REGISTER, hk_menu_register)))) {
+        return 0;
+    }
+    c = g_cmds[g_ncmds].obj;
+    g_cmds[g_ncmds++].fn = fn;
+    *(DWORD *)(c + 0x04) = property ? 1 : 0;            /* a property: no argument reads it */
+    *(const char **)(c + 0x08) = "bf1942patch";
+    *(const char **)(c + 0x0c) = name;
+    *(DWORD *)(c + 0x10) = 3;                           /* typed in the console and run from .con files */
+    *(DWORD *)(c + 0x14) = property ? 0 : 1;            /* a method's argument */
+    *(DWORD *)(c + 0x18) = 1;
+    *(const char **)(c + 0x4c) = "std::string";
+    *(const char **)(c + 0x50) = kind == BF_CONSOLE_INT ? "int" : "std::string";
+    *(DWORD *)(c + 0x78) = 0;
+    c[0xa1] = 1;
+    return 1;
 }
 
 /* ---------------------------------------------------------------- saving with the profile */
@@ -237,6 +283,26 @@ int bf_meme_bind(void *mgr, const char *path, const char *name, int type, void *
     if (!obj) {
         return 0;
     }
+    ((void (__attribute__((thiscall)) *)(void *, void *, const char *))BF_ADDR(MEME_REGISTER))(mgr, obj, path);
+    return 1;
+}
+
+/* a function the menus call by name (a Function node, e.g. a button's CallFunctionAction), as the scoreboard registers
+ * its own (0x6e0070): a dice::meme::Function (0x7f2f50, thiscall(object, name), which copies the name) with the
+ * vtable of the scoreboard's member functions (0x924de0: +0x40 calls +0xc with ecx = +8), registered under path */
+#define FUNCTION_CTOR 0x7f2f50u
+#define FUNCTION_VTBL 0x924de0u
+
+int bf_meme_bind_function(void *mgr, const char *path, const char *name, void *owner, bf_meme_fn fn)
+{
+    BYTE *obj = ((void *(__cdecl *)(size_t))BF_ADDR(MEME_NEW))(0x10);
+    if (!obj) {
+        return 0;
+    }
+    ((void *(__attribute__((thiscall)) *)(void *, const char *))BF_ADDR(FUNCTION_CTOR))(obj, name);
+    *(DWORD *)obj = FUNCTION_VTBL;
+    *(void **)(obj + 8) = owner;
+    *(bf_meme_fn *)(obj + 0xc) = fn;
     ((void (__attribute__((thiscall)) *)(void *, void *, const char *))BF_ADDR(MEME_REGISTER))(mgr, obj, path);
     return 1;
 }
@@ -480,6 +546,8 @@ static DWORD edit_len(const bf_meme_edit *e, DWORD was)
         return was;
     case BF_MEME_PICTURE:
         return 17 + (DWORD)strlen(e->text);   /* {next = NULL, the texture: u8 length, characters} */
+    case BF_MEME_FUNCTION:
+        return 8;
     default:
         return 12;
     }
@@ -602,6 +670,11 @@ static DWORD graft_content(const bf_meme_piece *pc, const bf_meme_graft_row *r, 
                     return 0;
                 }
                 break;
+            case BF_MEME_FUNCTION:   /* {size, the function's name, class}: nothing else */
+                if (!data_node(p, page, x->var, "Function")) {
+                    return 0;
+                }
+                break;
             default:
                 wr32(p + 8, (DWORD)strlen(x->text));
                 memcpy(p + 12, x->text, strlen(x->text));
@@ -694,20 +767,20 @@ static meme_strings *donor_of(const bf_meme_piece *pc, meme_strings *page, DWORD
     return NULL;
 }
 
-BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *src, DWORD size, const bf_meme_donor *donors,
-                         int n_donors, DWORD *out_size)
+static const BYTE null_next[8] = {8, 0, 0, 0, 0, 0, 0, 0};
+
+/* g's rows, chained: row k = TransformNode {next = row k+1 (or NULL), rect, content}; malloc'd, NULL if a file is
+ * not the one the graft was worked out on. Names the copies need are added to the page's table. */
+static BYTE *graft_chain(const bf_meme_graft *g, meme_strings *page, const BYTE *src, DWORD size,
+                         const bf_meme_donor *donors, int n_donors, meme_strings **tables, DWORD *chain_len)
 {
-    static const BYTE null_next[8] = {8, 0, 0, 0, 0, 0, 0, 0};
-    meme_strings *page = malloc(sizeof *page), *tables[MAX_DONORS] = {NULL, NULL, NULL, NULL}, *donor;
-    BYTE *rows = NULL, *out = NULL, *p;
-    DWORD *out_at = NULL, room = 0, rows_len = 0, added = 0, i, at, donor_size;
+    meme_strings *donor;
+    BYTE *rows = NULL, *p;
+    DWORD *out_at = NULL, room = 0, rows_len = 0, i, at, donor_size;
     DWORD row_at[32], row_len[32];
     bf_meme_piece own;
     int tn;
-    if (!page || g->n_rows > 32) {
-        goto done;
-    }
-    if (size != g->size || !read_strings(page, src, size, g->strings_end) || g->hang_at + 8 > size
+    if (g->n_rows > 32 || size != g->size || g->hang_at + 8 > size || g->hang_at <= g->strings_end
         || memcmp(src + g->hang_at, null_next, 8)) {
         goto done;
     }
@@ -717,7 +790,13 @@ BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *src, DWORD size, co
             goto done;
         }
     }
-    /* the rows' contents, last row first: row k = TransformNode {next = row k+1 (or NULL), rect, content} */
+    for (i = 0; i < g->n_bytes; i++) {
+        const bf_meme_bytes *b = &g->bytes[i];
+        if (b->at <= g->strings_end || b->at + b->len > size || !b->now || memcmp(src + b->at, b->was, b->len)) {
+            goto done;
+        }
+    }
+    /* the rows' contents */
     for (i = 0; i < g->n_rows; i++) {
         const bf_meme_piece *pc = piece_of(g, &g->rows[i], &own);
         DWORD k;
@@ -771,39 +850,123 @@ BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *src, DWORD size, co
         rows = chain;
         rows_len = len;
     }
+    *chain_len = rows_len;
+    free(out_at);
+    return rows;
+done:
+    free(rows);
+    free(out_at);
+    return NULL;
+}
+
+/* where a node of the page as shipped is in the grafted one: after the new names, and moved by every chain hung before
+ * it (each in place of an 8-byte NULL) */
+static DWORD grafted_at(DWORD at, DWORD added, const bf_meme_graft *const *gs, const DWORD *lens, int n)
+{
+    DWORD to = at + added;
+    int i;
+    for (i = 0; i < n; i++) {
+        if (gs[i]->hang_at < at) {
+            to += lens[i] - 8;
+        }
+    }
+    return to;
+}
+
+BYTE *bf_meme_graft_page(const bf_meme_graft *const *gs, int n, const BYTE *src, DWORD size,
+                         const bf_meme_donor *donors, int n_donors, DWORD *out_size)
+{
+    meme_strings *page = malloc(sizeof *page), *tables[MAX_DONORS] = {NULL, NULL, NULL, NULL};
+    BYTE *chains[BF_MEME_MAX_GRAFTS] = {NULL}, *out = NULL, *p;
+    DWORD lens[BF_MEME_MAX_GRAFTS], added = 0, grown = 0, strings_end, at, pos, i;
+    int k, j, order[BF_MEME_MAX_GRAFTS];
+    if (!page || n < 1 || n > BF_MEME_MAX_GRAFTS) {
+        goto done;
+    }
+    strings_end = gs[0]->strings_end;
+    if (!read_strings(page, src, size, strings_end)) {
+        goto done;
+    }
+    for (k = 0; k < n; k++) {
+        for (j = 0; j < k; j++) {
+            if (gs[j]->hang_at == gs[k]->hang_at) {
+                goto done;
+            }
+        }
+        /* the bytes changed in place stay clear of every chain's NULL */
+        for (i = 0; i < gs[k]->n_bytes; i++) {
+            const bf_meme_bytes *b = &gs[k]->bytes[i];
+            for (j = 0; j < n; j++) {
+                if (b->at < gs[j]->hang_at + 8 && gs[j]->hang_at < b->at + b->len) {
+                    goto done;
+                }
+            }
+        }
+        if (gs[k]->strings_end != strings_end
+            || !(chains[k] = graft_chain(gs[k], page, src, size, donors, n_donors, tables, &lens[k]))) {
+            goto done;
+        }
+        grown += lens[k] - 8;
+    }
+    /* the chains in the order of their places in the page */
+    for (k = 0; k < n; k++) {
+        for (j = k; j > 0 && gs[order[j - 1]]->hang_at > gs[k]->hang_at; j--) {
+            order[j] = order[j - 1];
+        }
+        order[j] = k;
+    }
     for (i = 0; i < (DWORD)page->n_added; i++) {
         added += 1 + (DWORD)strlen(page->added[i]);
     }
-    *out_size = size + added + rows_len - 8;
+    *out_size = size + added + grown;
     if (!(out = malloc(*out_size))) {
         goto done;
     }
-    /* the table with its new names, the page up to hang_at (its ancestors grown), the rows, the rest */
-    memcpy(out, src, g->strings_end);
-    at = g->strings_end;
+    /* the table with its new names, then the page with each chain in place of its NULL next, then the rest */
+    memcpy(out, src, strings_end);
+    at = strings_end;
     for (i = 0; i < (DWORD)page->n_added; i++) {
         DWORD l = (DWORD)strlen(page->added[i]);
         out[at++] = (BYTE)l;
         memcpy(out + at, page->added[i], l);
         at += l;
     }
-    memcpy(out + at, src + g->strings_end, g->hang_at - g->strings_end);
-    for (i = 0; i < g->n_ancestors; i++) {
-        p = out + g->ancestors[i] + added;
-        wr32(p, rd32(p) + rows_len - 8);
+    pos = strings_end;
+    for (k = 0; k < n; k++) {
+        const bf_meme_graft *g = gs[order[k]];
+        memcpy(out + at, src + pos, g->hang_at - pos);
+        at += g->hang_at - pos;
+        memcpy(out + at, chains[order[k]], lens[order[k]]);
+        at += lens[order[k]];
+        pos = g->hang_at + 8;
     }
-    at += g->hang_at - g->strings_end;
-    memcpy(out + at, rows, rows_len);
-    at += rows_len;
-    memcpy(out + at, src + g->hang_at + 8, size - g->hang_at - 8);
+    memcpy(out + at, src + pos, size - pos);
+    /* every node around a hang point grows by its chain */
+    for (k = 0; k < n; k++) {
+        for (i = 0; i < gs[k]->n_ancestors; i++) {
+            p = out + grafted_at(gs[k]->ancestors[i], added, gs, lens, n);
+            wr32(p, rd32(p) + lens[k] - 8);
+        }
+        for (i = 0; i < gs[k]->n_bytes; i++) {
+            const bf_meme_bytes *b = &gs[k]->bytes[i];
+            memcpy(out + grafted_at(b->at, added, gs, lens, n), b->now, b->len);
+        }
+    }
 done:
     free(page);
     for (i = 0; i < MAX_DONORS; i++) {
         free(tables[i]);
     }
-    free(rows);
-    free(out_at);
+    for (k = 0; k < BF_MEME_MAX_GRAFTS; k++) {
+        free(chains[k]);
+    }
     return out;
+}
+
+BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *src, DWORD size, const bf_meme_donor *donors,
+                         int n_donors, DWORD *out_size)
+{
+    return bf_meme_graft_page(&g, 1, src, size, donors, n_donors, out_size);
 }
 
 /* ---------------------------------------------------------------- the opener */
@@ -839,36 +1002,39 @@ static int stream_replace(void *is, const BYTE *patched, DWORD size)
     return data != NULL;
 }
 
-/* the graft for an opened page: its donor pages are opened (and closed again: the stream's deleting destructor,
+/* the grafts for an opened page: their donor pages are opened (and closed again: the stream's deleting destructor,
  * vtable slot 0) through the original opener */
-static BYTE *graft_page(void *mgr, const bf_meme_graft *g, const BYTE *data, DWORD *size)
+static BYTE *graft_page(void *mgr, const bf_meme_graft *const *gs, int n_gs, const BYTE *data, DWORD *size)
 {
     bf_meme_donor donors[MAX_DONORS];
     void *streams[MAX_DONORS];
     BYTE *patched = NULL;
-    int n = 0, i, k;
+    int n = 0, i, k, x;
     DWORD r;
-    for (r = 0; r <= g->n_rows; r++) {
-        /* the graft's donor, then each row's */
-        const char *name = r == g->n_rows ? g->donor : g->rows[r].piece ? g->rows[r].piece->donor : NULL;
-        DWORD dsize = r == g->n_rows ? g->donor_size : g->rows[r].piece ? g->rows[r].piece->donor_size : 0;
-        for (k = 0; name && k < n && _stricmp(donors[k].name, name); k++) {
-        }
-        if (!name || k < n) {
-            continue;
-        }
-        if (n == MAX_DONORS || !(streams[n] = g_menu_open(mgr, name))) {
-            goto done;
-        }
-        donors[n].name = name;
-        donors[n].size = dsize;
-        donors[n].data = stream_data(streams[n], dsize);
-        n++;
-        if (!donors[n - 1].data) {
-            goto done;
+    for (x = 0; x < n_gs; x++) {
+        const bf_meme_graft *g = gs[x];
+        for (r = 0; r <= g->n_rows; r++) {
+            /* the graft's donor, then each row's */
+            const char *name = r == g->n_rows ? g->donor : g->rows[r].piece ? g->rows[r].piece->donor : NULL;
+            DWORD dsize = r == g->n_rows ? g->donor_size : g->rows[r].piece ? g->rows[r].piece->donor_size : 0;
+            for (k = 0; name && k < n && _stricmp(donors[k].name, name); k++) {
+            }
+            if (!name || k < n) {
+                continue;
+            }
+            if (n == MAX_DONORS || !(streams[n] = g_menu_open(mgr, name))) {
+                goto done;
+            }
+            donors[n].name = name;
+            donors[n].size = dsize;
+            donors[n].data = stream_data(streams[n], dsize);
+            n++;
+            if (!donors[n - 1].data) {
+                goto done;
+            }
         }
     }
-    patched = bf_meme_graft_rows(g, data, g->size, donors, n, size);
+    patched = bf_meme_graft_page(gs, n_gs, data, gs[0]->size, donors, n, size);
 done:
     for (i = 0; i < n; i++) {
         ((void (__attribute__((thiscall)) *)(void *, int))(*(void ***)streams[i])[0])(streams[i], 1);
@@ -876,36 +1042,48 @@ done:
     return patched;
 }
 
+/* a page gets one row (bf_menu_add_row), or every graft made for it at once (they are worked out on the file as
+ * shipped) */
 static void *__attribute__((thiscall)) hk_menu_open(void *mgr, const char *name)
 {
     void *is = g_menu_open(mgr, name);
-    BYTE *data, *patched;
-    DWORD size, expect;
-    int i;
+    const bf_meme_graft *grafts[BF_MEME_MAX_GRAFTS];
+    const char *what[BF_MEME_MAX_GRAFTS];
+    const bf_meme_row *row = NULL;
+    BYTE *data, *patched = NULL;
+    DWORD size;
+    int i, n = 0, ok;
     if (!is || !name) {
         return is;
     }
-    for (i = 0; i < g_nsplices; i++) {
+    for (i = 0; i < g_nsplices && !row; i++) {
         if (_stricmp(name, g_splices[i].page)) {
             continue;
         }
-        expect = g_splices[i].row ? g_splices[i].row->size : g_splices[i].graft->size;
-        if (!(data = stream_data(is, expect))) {
-            bf_log("menu: menu/%s is not the one the patch knows, no %s", name, g_splices[i].what);
-            break;                   /* a page changed by an earlier splice is a different size: the rest are skipped */
+        if (g_splices[i].row) {
+            row = g_splices[i].row;
+            what[0] = g_splices[i].what;
+            n = 1;
+        } else if (n < BF_MEME_MAX_GRAFTS) {
+            grafts[n] = g_splices[i].graft;
+            what[n++] = g_splices[i].what;
         }
-        patched = g_splices[i].row ? bf_meme_add_row(g_splices[i].row, data, expect, &size)
-                                   : graft_page(mgr, g_splices[i].graft, data, &size);
-        if (!patched) {
-            bf_log("menu: menu/%s is not the one the patch knows, no %s", name, g_splices[i].what);
-            break;
-        }
-        if (stream_replace(is, patched, size)) {
-            bf_log("menu: %s added to menu/%s", g_splices[i].what, name);
-        }
-        free(patched);
-        break;                       /* one splice per page */
     }
+    if (!n) {
+        return is;
+    }
+    if ((data = stream_data(is, row ? row->size : grafts[0]->size)) != NULL) {
+        patched = row ? bf_meme_add_row(row, data, row->size, &size) : graft_page(mgr, grafts, n, data, &size);
+    }
+    ok = patched && stream_replace(is, patched, size);
+    for (i = 0; i < n; i++) {
+        if (ok) {
+            bf_log("menu: %s added to menu/%s", what[i], name);
+        } else {
+            bf_log("menu: menu/%s is not the one the patch knows, no %s", name, what[i]);
+        }
+    }
+    free(patched);
     return is;
 }
 
@@ -932,7 +1110,7 @@ int bf_menu_add_row(const char *page, const bf_meme_row *row, const char *what)
     return add_splice(page, row, NULL, what);
 }
 
-/* grafts g's rows onto menu/<page> whenever the game opens it (one splice per page) */
+/* grafts g's rows onto menu/<page> whenever the game opens it, together with the page's other grafts */
 int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what)
 {
     return add_splice(page, NULL, g, what);
@@ -942,16 +1120,14 @@ int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what)
 
 void bf_menu_install(void)
 {
-    g_hud_scale = bf_ini_int("Widescreen", "HudScale", 100);
+    bf_setting_bind("hudScale", &g_hud_scale);   /* the slider, the profile and the console share it */
     set_scale(g_hud_scale);
-    if (!bf_ini_int("Widescreen", "HudScaleOption", 1)) {
-        bf_log("menu: HudScaleOption=0, the HUD scale is only [Widescreen] HudScale");
+    bf_setting_watch("hudScale", hud_scale_changed);
+    if (!bf_setting_int("hudScaleOption")) {
+        bf_log("menu: hudScaleOption 0, no HUD scale slider (the HUD scale is only bf1942patch.hudScale)");
         return;
     }
     g_on = 1;
-    if (!bf_hook_slot(MENU_REGISTER_SLOT, MENU_REGISTER, hk_menu_register)) {
-        bf_log("menu: the menu module's command registration differs, no bf1942patch.hudScale");
-    }
     if (!bf_redirect_call(LAST_LINE_CALL, WRITE_LINE, hk_write_last)) {
         bf_log("menu: GeneralOptions.con is written differently, the HUD scale is not saved with the profile");
     }

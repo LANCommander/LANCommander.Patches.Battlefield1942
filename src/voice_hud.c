@@ -1,4 +1,4 @@
-/* Voice chat on the HUD ([Voice] VoiceHud=1): under the minimap, one line per player talking (the local player
+/* Voice chat on the HUD (bf1942patch.voiceHud 1): under the minimap, one line per player talking (the local player
  * first, while their voice is sent), in the game's own HUD text and in the colour the game gives that player's team
  * in the chat, with an icon in front: a radio set for the team radio, a soldier with a megaphone for nearby.
  *
@@ -358,8 +358,8 @@ void bf_voice_hud_update(const bf_voice_state *s)
 
 void bf_voice_hud_install(void)
 {
-    if (!bf_ini_int("Voice", "VoiceHud", 1)) {
-        bf_log("voice: VoiceHud=0, no voice chat on the HUD");
+    if (!bf_setting_int("voiceHud")) {
+        bf_log("voice: voiceHud 0, no voice chat on the HUD");
         return;
     }
     make_rows();

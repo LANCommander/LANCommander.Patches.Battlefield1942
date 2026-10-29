@@ -2,6 +2,7 @@
 #define BF1942PATCH_H
 #include <windows.h>
 #include <stdint.h>
+#include "settings.h"
 
 #ifndef BF_VERSION
 #define BF_VERSION "dev"             /* build.sh passes the release tag */
@@ -12,11 +13,11 @@ void bf_install(void);               /* installs the patch modules */
 void bf_log(const char *fmt, ...);
 void bf_standalone_init(HINSTANCE dll);   /* proxy / ASI DllMain: settings and log next to the DLL, then the patches */
 
-/* where settings and log lines go: bf1942patch.ini / bf1942patch.log (proxy, ASI), or callbacks (Interposer plugin) */
-void bf_set_files(const char *ini, const char *log);
-const char *bf_log_file(void);       /* "" with the Interposer backend */
-void bf_set_backend(int (*config_int)(const char *section, const char *key, int def), void (*log_line)(const char *line));
-void bf_set_string_backend(int (*config_str)(const char *section, const char *key, char *out, int size));
+/* where the install's options and log lines go: bf1942patch.con / bf1942patch.log (proxy, ASI), or the Interposer's
+ * session log (Interposer plugin) */
+void bf_set_files(const char *con, const char *log);
+const char *bf_log_file(void);       /* "" with the Interposer's log */
+void bf_set_log_backend(void (*log_line)(const char *line));
 HMODULE bf_module(void);             /* this DLL */
 void bf_set_module(HMODULE dll);
 
@@ -35,14 +36,19 @@ int bf_replace_call(uint32_t site, const void *expect, size_t len, const void *t
 void *bf_detour(uint32_t fn, const void *prologue, size_t len, const void *hook);
 int bf_hook_slot(uint32_t slot, uint32_t expect, const void *hook);   /* a vtable entry, if it holds expect */
 
-/* settings: [section] key in Settings.ini in the save folder, else in bf1942patch.ini (or
- * Plugins.Battlefield1942.<key> in the Interposer's Config.yml) */
-int bf_ini_int(const char *section, const char *key, int def);
-int bf_ini_str(const char *section, const char *key, char *out, int size);   /* "" if missing */
-const char *bf_ini_file(void);       /* bf1942patch.ini (next to BF1942.exe with the Interposer plugin) */
-const char *bf_user_ini_file(void);  /* Settings.ini; NULL while the save folder is not known yet */
-void bf_ini_set_int(const char *section, const char *key, int value);   /* into Settings.ini (or bf1942patch.ini) */
-void bf_ini_set_str(const char *section, const char *key, const char *value);
+/* settings_game.c: the options (settings.h: bf_setting_int / bf_setting_str read them) from the install's
+ * bf1942patch.con, the config source (the Interposer's Config.yml), then the player's bf1942patch.con */
+void bf_settings_set_file(const char *path);
+const char *bf_settings_file(void);  /* the install's bf1942patch.con (next to BF1942.exe with the Interposer plugin) */
+const char *bf_user_settings_file(void);   /* the player's, in the save folder; NULL while it is not known yet */
+void bf_settings_set_source(void (*load)(void));   /* sets options (bf_option_set) after the install's file */
+void bf_settings_load(int server);   /* the dedicated server has no player's file */
+/* a value changed in the game (the options menus): set, and kept in the player's file */
+void bf_setting_keep_int(const char *name, int value);
+void bf_setting_keep_str(const char *name, const char *value);
+/* fn applies a value set in the console at once (else it takes effect when the game next starts) */
+void bf_setting_watch(const char *name, void (*fn)(void));
+void bf_settings_console_install(void);   /* every option a console command bf1942patch.<name> */
 
 void *bf_hook_import(const char *dll, const char *name, void *replacement);  /* returns the old target */
 void *bf_hook_import_in(HMODULE module, const char *dll, const char *name, void *replacement);
@@ -58,7 +64,7 @@ void bf_make_dirs(const char *path); /* creates every missing parent folder of p
 int bf_cdkey(const char *pack, char *out, int size);
 
 /* patch modules */
-void bf_crashlog_install(void);      /* crashlog.c: [Debug] CrashLog=1 logs crashes with a call chain */
+void bf_crashlog_install(void);      /* crashlog.c: bf1942patch.crashLog 1 logs crashes with a call chain */
 void bf_saves_install(void);         /* saves.c: profiles, campaign saves and settings in Saved Games */
 void bf_registry_install(void);      /* registry.c: no registry; the CD keys from a file or the settings */
 void bf_master_install(void);        /* master.c: the server list and server reporting through OpenSpy */
@@ -68,7 +74,10 @@ void bf_widescreen_install(void);    /* widescreen.c: Hor+ view and the HUD at i
 void bf_gamepad_install(void);       /* gamepad.c: SDL gamepads */
 void bf_framerate_install(void);     /* framerate.c: no 60 / 100 fps cap, HUD timing in real time */
 void bf_detail_install(void);        /* detail.c: mesh, tree and terrain LOD farther out (not the view distance) */
-void bf_voice_install(void);         /* voice.c: voice chat (LANCommander Comms), its HUD, keys and sound options */
+void bf_voice_install(void);         /* voice.c: voice chat (the Interposer's), its HUD, keys and sound options */
+void bf_voice_set_interposer(HMODULE interposer);   /* the Interposer that loaded the plugin build, for its voice */
+int bf_server_exe(void);             /* voice_server_win.c: this is BF1942_w32ded.exe 1.61 */
+void bf_server_install(void);        /* its voice server, and nothing else */
 
 /* restart.c: exported for rundll32 (the helper that bridges a restart) */
 void CALLBACK bf_restart_helper(HWND hwnd, HINSTANCE inst, LPSTR cmdline, int show);
@@ -87,9 +96,17 @@ void bf_wstring_free(void *mem);
 const wchar_t *bf_wstring_chars(const void *s);
 typedef struct { BYTE b[28]; } bf_msvc_string;   /* either, passed by value to the game's functions (callee destroys) */
 
-/* menu.c: the HUD scale in percent (the General options slider, bf1942patch.hudScale, [Widescreen] HudScale) */
+/* menu.c: the HUD scale in percent (the General options slider, bf1942patch.hudScale) */
 int bf_hud_scale(void);
 void bf_menu_install(void);
+
+/* menu.c: a console command bf1942patch.<name> (typed in the console, run from .con files), added at install. fn gets
+ * its name and the arguments (argc 0 for none) and writes what the console prints to out. BF_CONSOLE_INT / _STRING:
+ * a property, <name> [value] reads or sets a value; BF_CONSOLE_METHOD: a method taking a std::string (a quoted
+ * argument is one). 0 if it cannot be added. */
+enum { BF_CONSOLE_METHOD, BF_CONSOLE_INT, BF_CONSOLE_STRING };
+typedef void (*bf_console_fn)(const char *name, int argc, const char *const *argv, char *out, int size);
+int bf_console_add(const char *name, int kind, bf_console_fn fn);
 
 /* menu.c: a new row on an options page (MemeFile 2.0 menu/<page> in menu.rfa), added as the game opens the page: a
  * copy of an existing row's content, bound to a new variable, with a literal label, hung on the NULL next of the
@@ -133,6 +150,9 @@ enum { BF_MENU_INT, BF_MENU_BOOL, BF_MENU_FLOAT };
 int bf_meme_bind(void *mgr, const char *path, const char *name, int type, void *var);
 void *bf_meme_bind_wstring(void *mgr, const char *path, const char *name, const wchar_t *text);
 void bf_meme_set_wstring(void *mgr, void *node, const wchar_t *text);
+/* a function <path>/<name> the menus can call (a button's CallFunctionAction): fn(owner), on the game thread */
+typedef char (__attribute__((thiscall)) *bf_meme_fn)(void *owner);
+int bf_meme_bind_function(void *mgr, const char *path, const char *name, void *owner, bf_meme_fn fn);
 
 /* menu.c: rows grafted onto a page as the game opens it: copies of a row's content from the page itself or from
  * another page (the donor), with whole nodes replaced and some bytes changed, hung one after the other on a NULL
@@ -142,12 +162,13 @@ void bf_meme_set_wstring(void *mgr, void *node, const wchar_t *text);
 typedef struct { DWORD at; const char *cls; } bf_meme_node;   /* cls without "dice::meme::" */
 
 enum { BF_MEME_NULL, BF_MEME_INT, BF_MEME_WSTRING, BF_MEME_STRING, BF_MEME_BOOL, BF_MEME_FLOAT, BF_MEME_CLASS,
-       BF_MEME_PICTURE };
+       BF_MEME_PICTURE, BF_MEME_FUNCTION };
 typedef struct {
     DWORD at;                        /* the node replaced (one of the listed nodes) */
     const char *was_var;             /* its variable as shipped, or NULL (not checked) */
     int kind;                        /* what it becomes: */
-    const char *var;                 /* INT, BOOL, FLOAT, WSTRING: bound to var (INT, BOOL, FLOAT: NULL = a constant) */
+    const char *var;                 /* INT, BOOL, FLOAT, WSTRING: bound to var (INT, BOOL, FLOAT: NULL = a constant);
+                                      * FUNCTION: a Function node calling var */
     int value;                       /* INT, BOOL */
     const char *text;                /* STRING: a literal StringData; CLASS: the same node as another class
                                       * (dice::meme::<text>, of the same layout); PICTURE: a PictureNode of texture text */
@@ -184,6 +205,8 @@ typedef struct {
     DWORD n_nodes;
     const bf_meme_graft_row *rows;
     DWORD n_rows;
+    const bf_meme_bytes *bytes;      /* bytes changed in the page itself, in place (clear of every hang point) */
+    DWORD n_bytes;
 } bf_meme_graft;
 
 /* an opened donor page */
@@ -196,7 +219,13 @@ typedef struct {
 /* the page with the rows; malloc'd, or NULL if a file is not the one the graft was worked out on */
 BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *page, DWORD size, const bf_meme_donor *donors,
                          int n_donors, DWORD *out_size);
-int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what);   /* 0 if the opener is not hooked */
+/* the same with several grafts on one page (each on its own NULL next, all worked out on the file as shipped) */
+#define BF_MEME_MAX_GRAFTS 4
+BYTE *bf_meme_graft_page(const bf_meme_graft *const *gs, int n, const BYTE *page, DWORD size,
+                         const bf_meme_donor *donors, int n_donors, DWORD *out_size);
+/* grafts g onto menu/<page> whenever the game opens it, with any other graft for that page; 0 if the opener is not
+ * hooked */
+int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what);
 
 /* window.c: the game's main window (NULL until it exists) and the rectangle of the monitor it is on */
 HWND bf_game_window(void);
