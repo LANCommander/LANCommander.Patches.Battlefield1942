@@ -230,6 +230,6 @@ void bf_server_install(void)
                "server; clients need bf1942patch.voicePort and fastDlUrl");
     }
     if (voice) {
-        bf_log("voice server: installed (the Interposer loads with the first frame)");
+        bf_log("voice server: installed (it starts with the first frame)");
     }
 }

@@ -12,6 +12,7 @@ int bf_patch_start(void);            /* exe check + Enabled + not loaded twice; 
 void bf_install(void);               /* installs the patch modules */
 void bf_log(const char *fmt, ...);
 void bf_standalone_init(HINSTANCE dll);   /* proxy / ASI DllMain: settings and log next to the DLL, then the patches */
+void bf_standalone_detach(BOOL process_terminating);   /* proxy / ASI DllMain: the embedded Interposer stops */
 
 /* where the install's options and log lines go: bf1942patch.con / bf1942patch.log (proxy, ASI), or the Interposer's
  * session log (Interposer plugin) */
@@ -75,8 +76,9 @@ void bf_gamepad_install(void);       /* gamepad.c: SDL gamepads */
 void bf_framerate_install(void);     /* framerate.c: no 60 / 100 fps cap, HUD timing in real time */
 void bf_detail_install(void);        /* detail.c: mesh, tree and terrain LOD farther out (not the view distance) */
 void bf_voice_install(void);         /* voice.c: voice chat (the Interposer's), its HUD, keys and sound options */
-void bf_voice_set_interposer(HMODULE interposer);   /* the Interposer that loaded the plugin build, for its voice */
+void bf_voice_set_interposer(HMODULE interposer);   /* the Interposer the patch uses: the plugin build's, or its own */
 void bf_fastdl_install(void);        /* fastdl.c: the game server's FastDL server, handed to the Interposer on joining */
+void bf_fastdl_write_config(HMODULE dll);   /* the embedded Interposer's Config.yml (FastDL on), before it starts */
 int bf_server_exe(void);             /* voice_server_win.c: this is BF1942_w32ded.exe 1.61 */
 void bf_server_install(void);        /* its voice server, and nothing else */
 

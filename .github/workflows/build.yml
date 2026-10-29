@@ -18,15 +18,32 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        shell: msys2 {0}
+        shell: bash
+    env:
+      INTERPOSER_DIR: LANCommander.Interposer
     steps:
       - uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
+      # the Interposer linked into the dinput8.dll and the ASI (its static library, LANCommander.Interposer.Static):
+      # the branch or tag in the repository variable INTERPOSER_REF, else main
+      - uses: actions/checkout@v4
         with:
-          msystem: MINGW32
-          update: true
-          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 pkgconf zip curl
+          repository: LANCommander/LANCommander.Interposer
+          ref: ${{ vars.INTERPOSER_REF || 'main' }}
+          path: LANCommander.Interposer
+          fetch-depth: 0
+
+      - name: Locate vcpkg
+        run: echo "VCPKG_ROOT=$VCPKG_INSTALLATION_ROOT" >> "$GITHUB_ENV"
+
+      - name: Build the Interposer
+        shell: pwsh
+        working-directory: LANCommander.Interposer
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          powershell -NoProfile -ExecutionPolicy Bypass -File build/Get-YYThunks.ps1
+          cmake --preset windows-x86
+          cmake --build --preset windows-x86-release --target LANCommander.Interposer.Static
 
       - name: Version
         run: |
@@ -43,28 +60,19 @@ jobs:
         run: BF_VERSION="$VERSION" sh build.sh
 
       - name: Package
-        env:
-          INTERPOSER_DLL_URL: ${{ vars.INTERPOSER_DLL_URL }}
         run: |
           mkdir -p out/dinput8/bf1942patch out/asi/bf1942patch out/interposer/.interposer/Plugins out/interposer/bf1942patch
           cp build/dinput8.dll dist/bf1942patch.con out/dinput8/
           cp build/bf1942patch.asi dist/bf1942patch.con out/asi/
           cp build/LANCommander.Interposer.Plugin.Battlefield1942.dll out/interposer/.interposer/Plugins/
-          # the voice library (LANCommander.Interposer.dll, 32-bit), if the repository says where to get it; the
-          # Interposer plugin package runs in the Interposer already
-          if [ -n "$INTERPOSER_DLL_URL" ]; then
-            curl -fsSL "$INTERPOSER_DLL_URL" -o LANCommander.Interposer.dll
-            cp LANCommander.Interposer.dll out/dinput8/bf1942patch/
-            cp LANCommander.Interposer.dll out/asi/bf1942patch/
-          fi
           for d in dinput8 asi interposer; do
             cp LICENSE out/$d/bf1942patch/LICENSE.txt
             cp README.md out/$d/bf1942patch/README.md
             cp dist/cdkey.example out/$d/bf1942patch/cdkey.example
           done
-          (cd out/dinput8 && zip -qr "../bf1942patch-$VERSION-dinput8.zip" .)
-          (cd out/asi && zip -qr "../bf1942patch-$VERSION-asi.zip" .)
-          (cd out/interposer && zip -qr "../LANCommander.Interposer.Plugin.Battlefield1942-$VERSION.zip" .)
+          (cd out/dinput8 && 7z a -tzip -bso0 "../bf1942patch-$VERSION-dinput8.zip" .)
+          (cd out/asi && 7z a -tzip -bso0 "../bf1942patch-$VERSION-asi.zip" .)
+          (cd out/interposer && 7z a -tzip -bso0 "../LANCommander.Interposer.Plugin.Battlefield1942-$VERSION.zip" .)
 
       - uses: actions/upload-artifact@v4
         with:

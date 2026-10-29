@@ -25,7 +25,7 @@ typedef struct {
 
 const bf_voice_state *bf_voice_now(void);
 
-/* the Interposer with the voice API, loaded (on the game thread) the first time; NULL without one */
+/* the Interposer with the voice API (the plugin build's host, else the one built into the patch); NULL without one */
 HMODULE bf_voice_library(void);
 
 /* the push-to-talk keys, as the game names them (IDKey_Capital, Mouse_IDButton_3) */
@@ -75,8 +75,7 @@ int bf_query_value(const char *packet, int len, const char *key, char *value, in
 
 /* ---------------------------------------------------------------- voice.c, for fastdl.c */
 
-HMODULE bf_interposer_in_process(void);   /* any LANCommander Interposer already in the process (any version), or NULL */
-const char *bf_interposer_file(void);     /* the file bf_voice_library loads when none is in the process, else "" */
+HMODULE bf_interposer(void);   /* the Interposer the patch uses (any version): the plugin build's host, else the patch */
 
 /* ---------------------------------------------------------------- voice_hud.c, voice_menu.c, voice_scoreboard.c */
 

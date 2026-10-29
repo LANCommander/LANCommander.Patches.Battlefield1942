@@ -187,7 +187,7 @@ static void log_line(const char *line)
     }
 }
 
-__declspec(dllexport) void WINAPI InterposerPluginInit(HMODULE interposer)
+void WINAPI InterposerPluginInit(HMODULE interposer)
 {
     InterposerRegisterPluginConfig_fn register_config;
     g_log = (InterposerLog_fn)(void (*)(void))GetProcAddress(interposer, "InterposerLog");

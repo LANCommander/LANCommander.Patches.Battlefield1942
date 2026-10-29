@@ -142,9 +142,9 @@ bf1942patch.gamepadStartKey 0
 bf1942patch.gamepadBackKey 0
 
 rem ---------------------------------------------------------------- voice chat
-rem voice chat with the other players through the LANCommander Interposer: needs the Interposer in the game (the
-rem Interposer plugin build runs in it) or bf1942patch\LANCommander.Interposer.dll, and a game server that runs this
-rem patch (it hosts the voice server). The voice server is found from the game server the game joins; players hear the
+rem voice chat with the other players through the LANCommander Interposer (built into dinput8.dll and the ASI; the
+rem Interposer plugin build uses the Interposer it runs in), with a game server that runs this patch (it hosts the
+rem voice server). The voice server is found from the game server the game joins; players hear the
 rem players near them and, on the radio, their own team
 bf1942patch.voiceChat 1
 rem the voice server's port (UDP), used when the game server does not say which it is
@@ -184,15 +184,14 @@ rem are kept by player name with the profile, as the buddies are (Settings\Profi
 rem bf1942patch.voiceMute / voiceUnmute "<name>" in the console); 0 = no button, and the game's own buddy buttons (the
 rem saved mutes still apply)
 bf1942patch.voiceMuteButton 1
-rem the voice library when no LANCommander Interposer is in the game already; "" =
-rem bf1942patch\LANCommander.Interposer.dll (relative to BF1942.exe)
+rem Linux server only: the voice library when no LANCommander Interposer is preloaded; "" =
+rem libLANCommander.Interposer.so next to libbf1942patch.so
 bf1942patch.voiceLibrary ""
 
 rem ---------------------------------------------------------------- FastDL
 rem the maps (and mod archives) the game does not have, downloaded as it joins a server, by the LANCommander
-rem Interposer's FastDL: needs the Interposer in the game (with FastDL on in its Config.yml) or
-rem bf1942patch\LANCommander.Interposer.dll (the patch turns FastDL on in its bf1942patch\.interposer\Config.yml), and a
-rem game server that runs this patch and says where its FastDL server is (fastDlPort below). The server is asked on
+rem Interposer's FastDL (for the one built into dinput8.dll and the ASI, the patch turns FastDL on in .interposer\Config.yml
+rem next to it; a LANCommander-deployed Interposer needs FastDL on in its own Config.yml), with a game server that runs this patch and says where its FastDL server is (fastDlPort below). The server is asked on
 rem its voiceQueryPorts
 bf1942patch.fastDl 1
 rem a FastDL server for game servers that name none (or do not answer), e.g. "http://fastdl.lan:8080/"; "" = none.

@@ -10,10 +10,11 @@
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
-    (void)reserved;
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(inst);
         bf_standalone_init(inst);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        bf_standalone_detach(reserved != NULL);
     }
     return TRUE;
 }

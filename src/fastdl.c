@@ -12,9 +12,10 @@
  *   (InterposerSetFastDLBaseUrl); the Interposer's file hooks then fetch an archive the game does not have. The
  *   server's FastDL server always wins: over bf1942patch.fastDlUrl (used only when the server names none) and over
  *   the Interposer's own FastDL.BaseUrl.
- * - The Interposer's Config.yml decides the rest (FastDL.Enabled, FastDL.Paths). For the Interposer the patch
- *   loads itself (bf1942patch\LANCommander.Interposer.dll) a Config.yml with FastDL on for the .rfa files under Mods
- *   is written when it has none (or an empty one); a deployed Interposer's is LANCommander's to set. */
+ * - The Interposer's Config.yml decides the rest (FastDL.Enabled, FastDL.Paths). For the Interposer embedded in the
+ *   dinput8.dll / ASI builds, .interposer\Config.yml next to the patch, a Config.yml with FastDL on for the .rfa
+ *   files under Mods is written before it starts when there is none (or an empty one): one already there is the
+ *   player's, or LANCommander's. */
 #include <winsock2.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,25 +44,21 @@ static int readable(const void *p, size_t n)
     return (const BYTE *)p + n <= (const BYTE *)mbi.BaseAddress + mbi.RegionSize;
 }
 
-/* the Interposer's InterposerSetFastDLBaseUrl: the one in the game, else the one the patch loads (here, on the game
- * thread, if voice chat has not yet) */
+/* the Interposer's InterposerSetFastDLBaseUrl (the embedded one's goes to the Interposer that installed the hooks,
+ * when that is another one) */
 static set_url_fn interposer_set_url(void)
 {
     static int tried;
     static set_url_fn set;
-    HMODULE m;
     if (tried) {
         return set;
     }
     tried = 1;
-    if (!(m = bf_interposer_in_process()) && bf_interposer_file()[0]) {
-        m = bf_voice_library();
-    }
-    if (!m) {
-        bf_log("fastdl: no LANCommander Interposer in the game, no FastDL");
+    if (!bf_interposer()) {
+        bf_log("fastdl: no LANCommander Interposer, no FastDL");
         return NULL;
     }
-    if (!(set = (set_url_fn)(void (*)(void))GetProcAddress(m, "InterposerSetFastDLBaseUrl"))) {
+    if (!(set = (set_url_fn)(void (*)(void))GetProcAddress(bf_interposer(), "InterposerSetFastDLBaseUrl"))) {
         bf_log("fastdl: the LANCommander Interposer in the game has no InterposerSetFastDLBaseUrl; update it for "
                "FastDL");
     }
@@ -155,9 +152,9 @@ __asm__(".text\n"
         "    popal\n"
         "    jmp *_bf_fastdl_case\n");
 
-/* the Interposer the patch loads has its own .interposer\Config.yml: FastDL on for the maps under Mods, unless it has
- * one already that is not empty (the player's) */
-static void write_config(void)
+/* the embedded Interposer's .interposer\Config.yml, next to the patch (dll): FastDL on for the maps under Mods, unless
+ * there is one already that is not empty. Before the Interposer starts, which reads it then */
+void bf_fastdl_write_config(HMODULE dll)
 {
     static const char yaml[] =
         "# Written by bf1942patch: FastDL downloads the maps (and mod archives) the game lacks from the FastDL server\n"
@@ -168,11 +165,10 @@ static void write_config(void)
         "  Paths:\n"
         "    - Local: '%GAMEDIR%\\Mods'\n"
         "      Remote: Mods\n";
-    const char *dll = bf_interposer_file();
     char path[MAX_PATH + 32], *slash;
     WIN32_FILE_ATTRIBUTE_DATA a;
     FILE *f;
-    if (!dll[0] || !(slash = strrchr(lstrcpynA(path, dll, MAX_PATH), '\\'))) {
+    if (!bf_setting_int("fastDl") || !GetModuleFileNameA(dll, path, MAX_PATH) || !(slash = strrchr(path, '\\'))) {
         return;
     }
     strcpy(slash + 1, ".interposer\\Config.yml");
@@ -202,5 +198,4 @@ void bf_fastdl_install(void)
         bf_log("fastdl: the client's message handler differs (%08x), no FastDL", MAP_CASE_SLOT);
         return;
     }
-    write_config();
 }

@@ -309,7 +309,7 @@ static void quoted(char **p, char *out, size_t size)
     }
 }
 
-__declspec(dllexport) void CALLBACK bf_restart_helper(HWND hwnd, HINSTANCE inst, LPSTR cmdline, int show)
+void CALLBACK bf_restart_helper(HWND hwnd, HINSTANCE inst, LPSTR cmdline, int show)
 {
     char game[MAX_PATH], log[MAX_PATH + 16], ini[MAX_PATH + 16], exe[MAX_PATH + 16], cmd[4096], event[64], mod[64] = "bf1942", *p;
     unsigned long old_pid;

@@ -1,9 +1,8 @@
 /* bf1942patch.voiceChat: voice chat with the other players on the server, through the LANCommander Interposer's voice API.
  *
- * The voice library is the Interposer (LANCommander.Interposer.dll, x86), whose interposer_comms_* exports are the
- * former LANCommander Comms. A copy already in the process is used (the one that loaded the Interposer plugin build,
- * or one LANCommander deployed); else it is loaded from the bf1942patch folder next to BF1942.exe, on the first
- * step of the main loop rather than from a DllMain. Without it the game is left as it is. The game server runs the
+ * The voice library is the Interposer, whose interposer_comms_* exports are the former LANCommander Comms: the one
+ * that loaded the Interposer plugin build, else the one embedded in the dinput8.dll / ASI builds (the patch's own
+ * image exports them, bf1942patch.c). Without it the game is left as it is. The game server runs the
  * LANCommander Comms server plugin, which mirrors its players, teams and positions into a voice server and
  * advertises that server's port in its query replies (voice_net.c). This client:
  * - finds the server the game plays on and connects to its voice server as the local player (the server knows
@@ -90,7 +89,7 @@
 #define DECLARE(ret, name, args) static ret (INTERPOSER_CALL *p_##name) args;
 COMMS_FUNCTIONS(DECLARE)
 
-static HMODULE g_interposer;          /* the Interposer that loaded the plugin build */
+static HMODULE g_interposer;          /* the Interposer: the one that loaded the plugin build, else the patch itself */
 static HMODULE g_dll;
 static char g_dll_path[MAX_PATH];
 
@@ -99,106 +98,20 @@ void bf_voice_set_interposer(HMODULE interposer)
     g_interposer = interposer;
 }
 
+HMODULE bf_interposer(void)
+{
+    return g_interposer;
+}
+
 static int resolve(void)
 {
-#define RESOLVE(ret, name, args) \
-    if (!(p_##name = (ret (INTERPOSER_CALL *) args)(void (*)(void))GetProcAddress(g_dll, "interposer_" #name))) { \
-        bf_log("voice: interposer_%s is missing from %s", #name, g_dll_path); \
-        return 0; \
-    }
+#define RESOLVE(ret, name, args)     if (!(p_##name = (ret (INTERPOSER_CALL *) args)(void (*)(void))GetProcAddress(g_dll, "interposer_" #name))) {         bf_log("voice: interposer_%s is missing from %s", #name, g_dll_path);         return 0;     }
     COMMS_FUNCTIONS(RESOLVE)
     return 1;
 }
 
-/* an Interposer already in the process: the one that loaded the plugin build, else one deployed under any of the
- * names it ships as (the patch's own dinput8.dll exports neither). *old: one without voice chat */
-static HMODULE loaded_interposer(int *old)
-{
-    static const char *const names[] = {"LANCommander.Interposer.dll", "version.dll", "dinput8.dll", "dinput.dll",
-                                        "LANCommander.Interposer.asi"};
-    HMODULE m;
-    size_t i;
-    *old = 0;
-    for (i = 0; i <= sizeof names / sizeof names[0]; i++) {
-        m = i ? GetModuleHandleA(names[i - 1]) : g_interposer;
-        if (m && GetProcAddress(m, "interposer_comms_get_api_version")) {
-            return m;
-        }
-        *old |= m && GetProcAddress(m, "InterposerLog");
-    }
-    return NULL;
-}
-
-/* at install: the Interposer in the process, else the file to load on the first step of the main loop:
- * bf1942patch.voiceLibrary (relative to the game folder), else bf1942patch\LANCommander.Interposer.dll, else next to this DLL or
- * BF1942.exe */
-static int g_found = -1;             /* find_library's answer (voice.c and fastdl.c both ask) */
-
-static int find_library(void)
-{
-    char custom[MAX_PATH], self[MAX_PATH], *slash;
-    const char *tries[4];
-    int n = 0, i, old;
-    if (g_found >= 0) {
-        return g_found;
-    }
-    g_found = 0;
-    if ((g_dll = loaded_interposer(&old)) != NULL) {
-        GetModuleFileNameA(g_dll, g_dll_path, MAX_PATH);
-        return g_found = 1;
-    }
-    if (old) {
-        /* a second copy beside one that predates voice chat would install every hook again */
-        bf_log("voice: the LANCommander Interposer in the game has no voice chat; update it for voice chat");
-        return 0;
-    }
-    lstrcpynA(custom, bf_setting_str("voiceLibrary"), sizeof custom);
-    if (custom[0]) {
-        tries[n++] = custom;
-    }
-    tries[n++] = "bf1942patch\\LANCommander.Interposer.dll";
-    if (bf_module() && GetModuleFileNameA(bf_module(), self, MAX_PATH) && (slash = strrchr(self, '\\')) != NULL) {
-        strcpy(slash + 1, "LANCommander.Interposer.dll");
-        tries[n++] = self;
-    }
-    tries[n++] = "LANCommander.Interposer.dll";
-    for (i = 0; i < n; i++) {
-        if (tries[i][0] && tries[i][1] == ':') {
-            lstrcpynA(g_dll_path, tries[i], MAX_PATH);
-        } else {
-            snprintf(g_dll_path, sizeof g_dll_path, "%s%s", bf_game_dir(), tries[i]);
-        }
-        if (GetFileAttributesA(g_dll_path) != INVALID_FILE_ATTRIBUTES) {
-            return g_found = 1;
-        }
-    }
-    g_dll_path[0] = '\0';
-    bf_log("voice: no LANCommander.Interposer.dll in %sbf1942patch, no voice chat or FastDL", bf_game_dir());
-    return 0;
-}
-
-HMODULE bf_interposer_in_process(void)
-{
-    static const char *const names[] = {"LANCommander.Interposer.dll", "version.dll", "dinput8.dll", "dinput.dll",
-                                        "LANCommander.Interposer.asi"};
-    HMODULE m;
-    size_t i;
-    for (i = 0; i <= sizeof names / sizeof names[0]; i++) {
-        m = i ? GetModuleHandleA(names[i - 1]) : g_interposer;
-        if (m && GetProcAddress(m, "InterposerLog")) {
-            return m;
-        }
-    }
-    return NULL;
-}
-
-const char *bf_interposer_file(void)
-{
-    return find_library() && !g_dll ? g_dll_path : "";
-}
-
-/* the Interposer with the voice API this patch was built for, loaded on the game thread (not in a DllMain: loading
- * it installs its hooks); NULL without one. The game and the dedicated server (voice_server_win.c) both use it. */
+/* the Interposer with the voice API this patch was built for; NULL without one. The game and the dedicated server
+ * (voice_server_win.c) both use it. */
 HMODULE bf_voice_library(void)
 {
     static int tried;
@@ -208,24 +121,22 @@ HMODULE bf_voice_library(void)
         return g_dll;
     }
     tried = 1;
-    if (!g_dll && !g_dll_path[0] && !find_library()) {
+    if (!g_interposer) {
+        bf_log("voice: no LANCommander Interposer, no voice chat");
         return NULL;
     }
-    if (!g_dll && !(g_dll = LoadLibraryExA(g_dll_path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH))) {
-        bf_log("voice: cannot load %s (%lu), no voice chat", g_dll_path, GetLastError());
-        return NULL;
-    }
-    version = (uint32_t (INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_dll, "interposer_comms_get_api_version");
-    version_string = (const char *(INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_dll,
+    GetModuleFileNameA(g_interposer, g_dll_path, MAX_PATH);
+    version = (uint32_t (INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_interposer,
+                                                                                 "interposer_comms_get_api_version");
+    version_string = (const char *(INTERPOSER_CALL *)(void))(void (*)(void))GetProcAddress(g_interposer,
                                                                                           "interposer_comms_get_version_string");
     if (!version || !version_string || version() != INTERPOSER_COMMS_API_VERSION) {
         bf_log("voice: %s has voice API version %u, the patch needs %u; no voice chat", g_dll_path,
                version ? version() : 0, INTERPOSER_COMMS_API_VERSION);
-        g_dll = NULL;
         return NULL;
     }
     bf_log("voice: %s (Interposer %s)", g_dll_path, version_string());
-    return g_dll;
+    return g_dll = g_interposer;
 }
 
 static int load_library(void)
@@ -1011,7 +922,7 @@ static void tick(void)
     if (g_failed) {
         return;
     }
-    if (!g_client && !(load_library() && create())) {   /* the first step: the Interposer is loaded here */
+    if (!g_client && !(load_library() && create())) {   /* the first step */
         g_failed = 1;
         return;
     }
@@ -1096,7 +1007,7 @@ void bf_voice_install(void)
         bf_log("voice: voiceChat 0, no voice chat");
         return;
     }
-    if (!find_library()) {
+    if (!bf_voice_library()) {
         return;
     }
     g_port = (WORD)bf_setting_int("voicePort");

@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "bf1942patch.h"
+#ifdef BF_INTERPOSER_EMBEDDED
+#include "interposer/LANCommander.Interposer.Embedded.h"
+#endif
 
 #define BF_TIMESTAMP 0x417564c4u    /* BF1942.exe 1.61 (version string "BF1942 (Ver: Tue, 19 Oct 2004 14:...)") */
 #define BF_ENTRY     0x404c1au
@@ -18,6 +21,9 @@ static CRITICAL_SECTION g_log_cs;
 static int g_log_cs_ready;
 static HMODULE g_module;
 static int g_server;                 /* in BF1942_w32ded.exe (voice_server_win.c) */
+#ifdef BF_INTERPOSER_EMBEDDED
+static int g_embedded;               /* InterposerEmbeddedAttach: 1 installed its hooks, -1 another Interposer has them */
+#endif
 
 void bf_set_log_backend(void (*log_line)(const char *line))
 {
@@ -266,8 +272,31 @@ void bf_standalone_init(HINSTANCE dll)
     }
     bf_set_files(con, log);
     if (bf_patch_start()) {
+#ifdef BF_INTERPOSER_EMBEDDED
+        /* the Interposer linked into this DLL (voice chat, FastDL), started before the patches as its own DLL would be
+         * from its DllMain. It reads .interposer\Config.yml next to this DLL; with another Interposer in the game
+         * (LANCommander's) it installs nothing and its Interposer* calls go to that one */
+        if (!g_server) {
+            bf_fastdl_write_config(dll);
+        }
+        g_embedded = InterposerEmbeddedAttach(dll) ? 1 : -1;
+        bf_log("interposer: %s", g_embedded > 0 ? "embedded, installed its hooks"
+                                                : "embedded, another LANCommander Interposer in the game has the hooks");
+        bf_voice_set_interposer(dll);
+#endif
         bf_install();
     }
+}
+
+void bf_standalone_detach(BOOL process_terminating)
+{
+#ifdef BF_INTERPOSER_EMBEDDED
+    if (g_embedded) {
+        InterposerEmbeddedDetach(process_terminating);
+    }
+#else
+    (void)process_terminating;
+#endif
 }
 /* ---------------------------------------------------------------- the game's std::string (MSVC 7, bfcprt.dll) */
 
