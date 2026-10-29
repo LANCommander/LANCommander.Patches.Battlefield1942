@@ -153,7 +153,7 @@ rem the voice server's password, if it has one
 bf1942patch.voicePassword ""
 rem the voice server's host (then voicePort is used as it is); "" = the game server's
 bf1942patch.voiceServer ""
-rem the game server's query ports, asked for its voice port (LAN, internet)
+rem the game server's query ports, asked for its voice port and FastDL server (LAN, internet)
 bf1942patch.voiceQueryPorts "22000,23000"
 rem 1 = talk to the players nearby whenever the microphone hears speech, without holding a key (voice activation);
 rem 0 = push to talk with proximityKey. Also a check box in Options - Controls - Common
@@ -188,6 +188,17 @@ rem the voice library when no LANCommander Interposer is in the game already; ""
 rem bf1942patch\LANCommander.Interposer.dll (relative to BF1942.exe)
 bf1942patch.voiceLibrary ""
 
+rem ---------------------------------------------------------------- FastDL
+rem the maps (and mod archives) the game does not have, downloaded as it joins a server, by the LANCommander
+rem Interposer's FastDL: needs the Interposer in the game (with FastDL on in its Config.yml) or
+rem bf1942patch\LANCommander.Interposer.dll (the patch turns FastDL on in its bf1942patch\.interposer\Config.yml), and a
+rem game server that runs this patch and says where its FastDL server is (fastDlPort below). The server is asked on
+rem its voiceQueryPorts
+bf1942patch.fastDl 1
+rem a FastDL server for game servers that name none (or do not answer), e.g. "http://fastdl.lan:8080/"; "" = none.
+rem The game server's own always wins, over this and over the Interposer's FastDL.BaseUrl
+bf1942patch.fastDlUrl ""
+
 rem ---------------------------------------------------------------- dedicated server
 rem The dedicated server (BF1942_w32ded.exe, or bf1942_lnxded with libbf1942patch.so) hosts the voice server: voiceChat,
 rem voicePort (the port it listens on, UDP), voicePassword and voiceLibrary above apply to it too, and these. The
@@ -206,6 +217,13 @@ bf1942patch.proximityRange 50
 bf1942patch.proximityFullVolumeRange 4
 rem 1 = the bots are voice players too (testing)
 bf1942patch.voiceIncludeBots 0
+rem the FastDL server the players download missing maps from, told to them in the query replies (with or without
+rem voice chat): an HTTP server with the game's Mods folder at http://<fastDlHost>:<fastDlPort><fastDlPath>Mods/
+rem (Mods/<mod>/Archives/bf1942/levels/<map>.rfa). fastDlPort 0 = none; fastDlHost "" = this server's address;
+rem fastDlPath "" = /
+bf1942patch.fastDlPort 0
+bf1942patch.fastDlHost ""
+bf1942patch.fastDlPath ""
 rem the dedicated server's error dialogs are written to the log and answered OK, so an unattended server exits instead
 rem of waiting for a click forever
 bf1942patch.suppressDialogs 1

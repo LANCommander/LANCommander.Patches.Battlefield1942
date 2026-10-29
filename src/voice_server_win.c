@@ -210,21 +210,26 @@ static void suppress_dialogs(void)
 void bf_server_install(void)
 {
     static const BYTE frame_head[6] = {0x55, 0x8b, 0xec, 0x83, 0xe4, 0xf8};   /* push ebp; mov ebp,esp; and esp,-8 */
+    int fastdl, voice;
     if (bf_setting_int("suppressDialogs")) {
         suppress_dialogs();
     }
-    if (!bf_setting_int("voiceChat")) {
+    fastdl = bf_server_fastdl_init();
+    if (!(voice = bf_setting_int("voiceChat"))) {
         bf_log("voice server: voiceChat 0, no voice");
-        return;
-    }
-    if (!(g_frame = (DWORD (__attribute__((thiscall)) *)(void *))bf_detour(FRAME_FN, frame_head, sizeof frame_head,
-                                                                           hk_frame))) {
+    } else if (!(g_frame = (DWORD (__attribute__((thiscall)) *)(void *))bf_detour(FRAME_FN, frame_head,
+                                                                                  sizeof frame_head, hk_frame))) {
         bf_log("voice server: the server's frame (%08x) is hooked already, no voice", FRAME_FN);
+        voice = 0;
+    }
+    if (!voice && !fastdl) {
         return;
     }
     if (!(real_sendto = bf_hook_import("WSOCK32.dll", "sendto", hk_sendto))) {
-        bf_log("voice server: the server's sendto is not hooked, so its queries do not say the voice port; clients "
-               "need bf1942patch.voicePort");
+        bf_log("server: the server's sendto is not hooked, so its queries do not say the voice port or the FastDL "
+               "server; clients need bf1942patch.voicePort and fastDlUrl");
     }
-    bf_log("voice server: installed (the Interposer loads with the first frame)");
+    if (voice) {
+        bf_log("voice server: installed (the Interposer loads with the first frame)");
+    }
 }

@@ -76,6 +76,7 @@ void bf_framerate_install(void);     /* framerate.c: no 60 / 100 fps cap, HUD ti
 void bf_detail_install(void);        /* detail.c: mesh, tree and terrain LOD farther out (not the view distance) */
 void bf_voice_install(void);         /* voice.c: voice chat (the Interposer's), its HUD, keys and sound options */
 void bf_voice_set_interposer(HMODULE interposer);   /* the Interposer that loaded the plugin build, for its voice */
+void bf_fastdl_install(void);        /* fastdl.c: the game server's FastDL server, handed to the Interposer on joining */
 int bf_server_exe(void);             /* voice_server_win.c: this is BF1942_w32ded.exe 1.61 */
 void bf_server_install(void);        /* its voice server, and nothing else */
 

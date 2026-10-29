@@ -68,6 +68,16 @@ void bf_voice_query_cancel(void);
 int bf_voice_query_active(void);
 const char *bf_voice_query_address(void);     /* the host's address once resolved, else "" */
 
+/* the same query, blocking (up to 1.5 s, and the host name's lookup): the reply (\k\v pairs) of the query port whose
+ * \hostport\ is game_port (any, for 0) in reply. 1 found, 0 not, -1 the host cannot be resolved */
+int bf_query_info(const char *host, const WORD *ports, int n, WORD game_port, char *reply, int size);
+int bf_query_value(const char *packet, int len, const char *key, char *value, int size);   /* \key\'s value */
+
+/* ---------------------------------------------------------------- voice.c, for fastdl.c */
+
+HMODULE bf_interposer_in_process(void);   /* any LANCommander Interposer already in the process (any version), or NULL */
+const char *bf_interposer_file(void);     /* the file bf_voice_library loads when none is in the process, else "" */
+
 /* ---------------------------------------------------------------- voice_hud.c, voice_menu.c, voice_scoreboard.c */
 
 void bf_voice_hud_install(void);

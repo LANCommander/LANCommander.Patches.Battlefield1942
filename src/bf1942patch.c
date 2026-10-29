@@ -226,6 +226,7 @@ void bf_install(void)
     bf_framerate_install();
     bf_detail_install();
     bf_voice_install();
+    bf_fastdl_install();
 }
 
 const char *bf_log_file(void)

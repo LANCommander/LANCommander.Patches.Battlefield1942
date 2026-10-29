@@ -9,6 +9,9 @@
  *   the radio.
  * - The voice port is advertised as \commsport\ in the game's GameSpy query replies (the platform's sendto hook calls
  *   bf_server_query_reply), so clients do not need it set.
+ * - So is the FastDL server the maps and mods are downloaded from (bf1942patch.fastDlPort, fastDlHost, fastDlPath), as
+ *   \fastdlport\, \fastdlhost\ and \fastdlpath\: the clients hand it to their Interposer (fastdl.c). That needs no
+ *   voice server.
  * Everything but bf_server_query_reply runs on the game thread, from the platform's frame hook. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -295,13 +298,44 @@ static int next_slash(const char *p, int at, int length)
     return at;
 }
 
+/* \fastdlport\<port>, then \fastdlhost\<host> and \fastdlpath\<path> if they are set; "" without FastDL */
+static char g_fastdl[2 * BF_OPT_STR_SIZE + 64];
+
+int bf_server_fastdl_init(void)
+{
+    const char *host = bf_setting_str("fastDlHost"), *path = bf_setting_str("fastDlPath");
+    int port = bf_setting_int("fastDlPort"), n;
+    g_fastdl[0] = '\0';
+    if (port <= 0 || port > 65535) {
+        if (port) {
+            bf_log("fastdl: fastDlPort %d is not a port, FastDL is not advertised", port);
+        }
+        return 0;
+    }
+    /* the replies are \key\value: a backslash would end the value */
+    if (strchr(host, '\\') || strchr(path, '\\')) {
+        bf_log("fastdl: fastDlHost and fastDlPath cannot hold a backslash, FastDL is not advertised");
+        return 0;
+    }
+    n = snprintf(g_fastdl, sizeof g_fastdl, "\\fastdlport\\%d", port);
+    if (host[0]) {
+        n += snprintf(g_fastdl + n, sizeof g_fastdl - n, "\\fastdlhost\\%s", host);
+    }
+    if (path[0]) {
+        snprintf(g_fastdl + n, sizeof g_fastdl - n, "\\fastdlpath\\%s%s", path[0] == '/' ? "" : "/", path);
+    }
+    bf_log("fastdl: the query replies say the FastDL server is http://%s:%d%s%s", host[0] ? host : "<this server>",
+           port, path[0] == '/' ? "" : "/", path);
+    return 1;
+}
+
 int bf_server_query_reply(const char *packet, int length, char *out, int size)
 {
-    static const char key[] = "commsport";
-    char pair[32];
+    static const char key[] = "commsport", fastdl_key[] = "fastdlport";
+    char pairs[sizeof g_fastdl + 32];
     int pos = 0, final_at = -1, key_end, value_end, n, i;
     uint16_t port = g_port;
-    if (!port || !packet || length < 7 || packet[0] != '\\') {
+    if ((!port && !g_fastdl[0]) || !packet || length < 7 || packet[0] != '\\') {
         return 0;
     }
     /* cheap rejection first: this sees every packet the game server sends */
@@ -318,7 +352,8 @@ int bf_server_query_reply(const char *packet, int length, char *out, int size)
         }
         value_end = next_slash(packet, key_end + 1, length);
         n = key_end - pos - 1;
-        if (n == (int)sizeof key - 1 && !memcmp(packet + pos + 1, key, (size_t)n)) {
+        if ((n == (int)sizeof key - 1 && !memcmp(packet + pos + 1, key, (size_t)n))
+            || (n == (int)sizeof fastdl_key - 1 && !memcmp(packet + pos + 1, fastdl_key, (size_t)n))) {
             return 0;
         }
         if (n == 5 && !memcmp(packet + pos + 1, "final", 5) && final_at < 0) {
@@ -326,12 +361,13 @@ int bf_server_query_reply(const char *packet, int length, char *out, int size)
         }
         pos = value_end;
     }
-    n = snprintf(pair, sizeof pair, "\\%s\\%u", key, port);
+    n = port ? snprintf(pairs, sizeof pairs, "\\%s\\%u", key, port) : 0;
+    n += snprintf(pairs + n, sizeof pairs - n, "%s", g_fastdl);
     if (final_at < 0 || length + n > size) {
         return 0;
     }
     memcpy(out, packet, (size_t)final_at);
-    memcpy(out + final_at, pair, (size_t)n);
+    memcpy(out + final_at, pairs, (size_t)n);
     memcpy(out + final_at + n, packet + final_at, (size_t)(length - final_at));
     return length + n;
 }

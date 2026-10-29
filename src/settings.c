@@ -74,6 +74,13 @@ const bf_option bf_options[] = {
     I("voiceOptions", 0, 1, "Voice", "VoiceOptions"),
     I("voiceMuteButton", 0, 1, "Voice", "VoiceMuteButton"),
     S("voiceLibrary", 0, "", "Voice", "VoiceLibrary"),
+    /* FastDL: maps and mods the game lacks, downloaded through the Interposer */
+    I("fastDl", 0, 1, "FastDL", "FastDL"),
+    S("fastDlUrl", 0, "", "FastDL", "FastDLUrl"),
+    /* the dedicated server's FastDL server, advertised in its query replies */
+    S("fastDlHost", BF_OPT_SERVER, "", "FastDL", "FastDLHost"),
+    I("fastDlPort", BF_OPT_SERVER, 0, "FastDL", "FastDLPort"),
+    S("fastDlPath", BF_OPT_SERVER, "", "FastDL", "FastDLPath"),
     /* the dedicated server's voice server */
     S("voiceBindAddress", BF_OPT_SERVER, "", "Voice", "VoiceBindAddress"),
     S("voiceAdminKey", BF_OPT_SERVER, "", "Voice", "VoiceAdminKey"),

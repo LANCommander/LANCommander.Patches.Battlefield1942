@@ -27,7 +27,11 @@ void bf_log(const char *fmt, ...);
 
 void bf_server_tick(void);           /* on the game thread, once a frame */
 void bf_server_stop(void);           /* the game quits: the voice server stops before exit runs */
-/* the game's query reply with \commsport\<voice port> before its \final\ (out holds size bytes): its length, 0 if it
- * is not a reply to change (not one, has the key already, no voice server, no room). Any thread. */
+/* the FastDL server the query replies advertise, from the options (at start, before the replies are sent): 1 if there
+ * is one */
+int bf_server_fastdl_init(void);
+/* the game's query reply with \commsport\<voice port> and the FastDL server's \fastdlport\ (\fastdlhost\,
+ * \fastdlpath\) before its \final\ (out holds size bytes): its length, 0 if it is not a reply to change (not one, has
+ * the keys already, nothing to add, no room). Any thread. */
 int bf_server_query_reply(const char *packet, int length, char *out, int size);
 #endif

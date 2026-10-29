@@ -131,14 +131,20 @@ static HMODULE loaded_interposer(int *old)
 /* at install: the Interposer in the process, else the file to load on the first step of the main loop:
  * bf1942patch.voiceLibrary (relative to the game folder), else bf1942patch\LANCommander.Interposer.dll, else next to this DLL or
  * BF1942.exe */
+static int g_found = -1;             /* find_library's answer (voice.c and fastdl.c both ask) */
+
 static int find_library(void)
 {
     char custom[MAX_PATH], self[MAX_PATH], *slash;
     const char *tries[4];
     int n = 0, i, old;
+    if (g_found >= 0) {
+        return g_found;
+    }
+    g_found = 0;
     if ((g_dll = loaded_interposer(&old)) != NULL) {
         GetModuleFileNameA(g_dll, g_dll_path, MAX_PATH);
-        return 1;
+        return g_found = 1;
     }
     if (old) {
         /* a second copy beside one that predates voice chat would install every hook again */
@@ -162,11 +168,32 @@ static int find_library(void)
             snprintf(g_dll_path, sizeof g_dll_path, "%s%s", bf_game_dir(), tries[i]);
         }
         if (GetFileAttributesA(g_dll_path) != INVALID_FILE_ATTRIBUTES) {
-            return 1;
+            return g_found = 1;
         }
     }
-    bf_log("voice: no LANCommander.Interposer.dll in %sbf1942patch, no voice chat", bf_game_dir());
+    g_dll_path[0] = '\0';
+    bf_log("voice: no LANCommander.Interposer.dll in %sbf1942patch, no voice chat or FastDL", bf_game_dir());
     return 0;
+}
+
+HMODULE bf_interposer_in_process(void)
+{
+    static const char *const names[] = {"LANCommander.Interposer.dll", "version.dll", "dinput8.dll", "dinput.dll",
+                                        "LANCommander.Interposer.asi"};
+    HMODULE m;
+    size_t i;
+    for (i = 0; i <= sizeof names / sizeof names[0]; i++) {
+        m = i ? GetModuleHandleA(names[i - 1]) : g_interposer;
+        if (m && GetProcAddress(m, "InterposerLog")) {
+            return m;
+        }
+    }
+    return NULL;
+}
+
+const char *bf_interposer_file(void)
+{
+    return find_library() && !g_dll ? g_dll_path : "";
 }
 
 /* the Interposer with the voice API this patch was built for, loaded on the game thread (not in a DllMain: loading

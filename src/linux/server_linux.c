@@ -74,6 +74,7 @@ static const game_version VERSIONS[] = {
 
 static const game_version *g_version;
 static int g_running;
+static int g_replies;                /* the query replies advertise a FastDL server (without voice too) */
 
 /* ---------------------------------------------------------------- the log and the settings */
 
@@ -372,7 +373,8 @@ static int retarget_call(uintptr_t site, void *hook, void **original)
     return 1;
 }
 
-/* the game's own UDP sends: its query replies get \commsport\ (the voice library sends with sendmsg) */
+/* the game's own UDP sends: its query replies get \commsport\ and the FastDL server (the voice library sends with
+ * sendmsg) */
 EXPORT GAME_ENTRY ssize_t sendto(int fd, const void *buf, size_t len, int flags, const struct sockaddr *to,
                                  socklen_t tolen)
 {
@@ -384,7 +386,7 @@ EXPORT GAME_ENTRY ssize_t sendto(int fd, const void *buf, size_t len, int flags,
     if (!real) {
         real = (sendto_fn)dlsym(RTLD_NEXT, "sendto");
     }
-    if (g_running && len < sizeof reply && (n = bf_server_query_reply(buf, (int)len, reply, sizeof reply)) > 0) {
+    if ((g_running || g_replies) && len < sizeof reply && (n = bf_server_query_reply(buf, (int)len, reply, sizeof reply)) > 0) {
         sent = real(fd, reply, (size_t)n, flags, to, tolen);
         return sent < 0 ? sent : (ssize_t)len;
     }
@@ -451,6 +453,7 @@ __attribute__((constructor)) static void start(void)
     snprintf(path, sizeof path, "%sbf1942patch.con", self_dir(dir, sizeof dir));
     load_settings(config && *config ? config : path);
     g_log_stderr = bf_setting_int("logToStderr");
+    g_replies = bf_server_fastdl_init();
     if (!bf_setting_int("voiceChat")) {
         bf_log("voice server: voiceChat 0, no voice");
         return;

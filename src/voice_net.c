@@ -6,7 +6,8 @@
  * - Its voice port: the LANCommander Comms server plugin adds \commsport\<port> to the game server's GameSpy
  *   query replies. "\info\" goes to each query port (22000 LAN, 23000 internet); a reply whose \hostport\ is not
  *   the game port is another server on the same host. Host names are resolved on a thread of their own, so the
- *   game never waits on DNS. */
+ *   game never waits on DNS.
+ * - bf_query_info is the same query, blocking (fastdl.c asks it as the game joins, while it loads anyway). */
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <stdio.h>
@@ -338,7 +339,7 @@ int bf_voice_query_start(const char *host, const WORD *ports, int n, WORD game_p
 }
 
 /* the value of \key\ in a "\k\v\k\v..." reply */
-static int find_value(const char *packet, int len, const char *key, char *value, int size)
+int bf_query_value(const char *packet, int len, const char *key, char *value, int size)
 {
     int pos = 0, kl = (int)strlen(key);
     if (len <= 0 || packet[0] != '\\') {
@@ -417,13 +418,13 @@ int bf_voice_query_poll(WORD *voice_port)
             if (g_q.ports[k] != ntohs(from.sin_port)) {
                 continue;
             }
-            if (find_value(buf, n, "hostport", value, sizeof value)) {
+            if (bf_query_value(buf, n, "hostport", value, sizeof value)) {
                 g_q.replies[k].host_port = parse_port(value);
             }
-            if (find_value(buf, n, "commsport", value, sizeof value)) {
+            if (bf_query_value(buf, n, "commsport", value, sizeof value)) {
                 g_q.replies[k].voice_port = parse_port(value);
             }
-            if (find_value(buf, n, "final", value, sizeof value)) {
+            if (bf_query_value(buf, n, "final", value, sizeof value)) {
                 g_q.replies[k].final = 1;
             }
         }
@@ -446,4 +447,105 @@ int bf_voice_query_poll(WORD *voice_port)
         return -1;
     }
     return 0;
+}
+
+/* ---------------------------------------------------------------- the blocking query (fastdl.c) */
+
+int bf_query_info(const char *host, const WORD *ports, int n, WORD game_port, char *reply, int size)
+{
+    static const char info[] = "\\info\\";
+    struct { char text[2048]; int len, final; } *got;
+    struct addrinfo hints, *res = NULL;
+    struct in_addr in;
+    WSADATA wsa;
+    SOCKET s;
+    ULONGLONG deadline;
+    char buf[2048], value[16];
+    int i, k, sent = 0, found = 0, done = 0;
+    if (n <= 0 || !host[0] || WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        return -1;
+    }
+    n = n < MAX_QUERY_PORTS ? n : MAX_QUERY_PORTS;
+    if ((in.s_addr = inet_addr(host)) == INADDR_NONE) {
+        memset(&hints, 0, sizeof hints);
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+        if (getaddrinfo(host, NULL, &hints, &res) != 0 || !res) {
+            WSACleanup();
+            return -1;
+        }
+        in = ((const struct sockaddr_in *)res->ai_addr)->sin_addr;
+        freeaddrinfo(res);
+    }
+    if (!(got = calloc(n, sizeof *got)) || (s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == INVALID_SOCKET) {
+        free(got);
+        WSACleanup();
+        return -1;
+    }
+    for (i = 0; i < n; i++) {
+        struct sockaddr_in to;
+        memset(&to, 0, sizeof to);
+        to.sin_family = AF_INET;
+        to.sin_addr = in;
+        to.sin_port = htons(ports[i]);
+        if (sendto(s, info, sizeof info - 1, 0, (const struct sockaddr *)&to, sizeof to) != SOCKET_ERROR) {
+            sent++;
+        } else {
+            got[i].final = 1;            /* nothing to wait for */
+            done++;
+        }
+    }
+    deadline = GetTickCount64() + QUERY_TIMEOUT_MS;
+    while (sent && !found && done < n) {
+        ULONGLONG now = GetTickCount64();
+        struct timeval tv;
+        struct sockaddr_in from;
+        fd_set readable;
+        int flen = sizeof from, len;
+        if (now >= deadline) {
+            break;
+        }
+        tv.tv_sec = (long)((deadline - now) / 1000);
+        tv.tv_usec = (long)((deadline - now) % 1000) * 1000;
+        FD_ZERO(&readable);
+        FD_SET(s, &readable);
+        if (select(0, &readable, NULL, NULL, &tv) <= 0) {
+            break;
+        }
+        if ((len = recvfrom(s, buf, sizeof buf - 1, 0, (struct sockaddr *)&from, &flen)) == SOCKET_ERROR) {
+            if (WSAGetLastError() == WSAECONNRESET) {
+                continue;                /* a query port nobody listens on (ICMP port unreachable) */
+            }
+            break;
+        }
+        buf[len] = '\0';
+        if (from.sin_addr.s_addr != in.s_addr) {
+            continue;
+        }
+        for (k = 0; k < n; k++) {
+            if (ports[k] != ntohs(from.sin_port) || got[k].final) {
+                continue;
+            }
+            /* a reply may come in more than one packet: they add up to the \final\ */
+            if (got[k].len + len < (int)sizeof got[k].text) {
+                memcpy(got[k].text + got[k].len, buf, (size_t)len + 1);
+                got[k].len += len;
+            }
+            if (!bf_query_value(buf, len, "final", value, sizeof value)) {
+                continue;
+            }
+            got[k].final = 1;
+            done++;
+            /* a reply without \hostport\ cannot be checked: taken rather than ignored */
+            if (!game_port || !bf_query_value(got[k].text, got[k].len, "hostport", value, sizeof value)
+                || parse_port(value) == game_port) {
+                lstrcpynA(reply, got[k].text, size);
+                found = 1;
+            }
+        }
+    }
+    closesocket(s);
+    free(got);
+    WSACleanup();
+    return found;
 }
