@@ -10,7 +10,7 @@ export PATH="/c/msys64/mingw32/bin:$PATH"
 OUT=build
 mkdir -p $OUT
 CFLAGS="-m32 -O2 -Wall -Wextra -shared -static-libgcc -s"
-CORE="src/bf1942patch.c src/iat.c src/paths.c src/crashlog.c src/registry.c src/saves.c src/master.c src/d3d.c src/window.c src/restart.c src/widescreen.c src/menu.c src/gamepad.c src/framerate.c src/detail.c"
+CORE="src/bf1942patch.c src/iat.c src/paths.c src/crashlog.c src/registry.c src/saves.c src/master.c src/d3d.c src/window.c src/restart.c src/widescreen.c src/menu.c src/gamepad.c src/framerate.c src/detail.c src/voice.c src/voice_net.c src/voice_hud.c src/voice_menu.c src/voice_icons.c"
 VERSION_FLAG="-DBF_VERSION=\"${BF_VERSION:-dev}\""
 
 # SDL2 (gamepads), linked statically: the patch stays a single DLL

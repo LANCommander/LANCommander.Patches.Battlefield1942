@@ -42,6 +42,7 @@ int bf_ini_str(const char *section, const char *key, char *out, int size);   /* 
 const char *bf_ini_file(void);       /* bf1942patch.ini (next to BF1942.exe with the Interposer plugin) */
 const char *bf_user_ini_file(void);  /* Settings.ini; NULL while the save folder is not known yet */
 void bf_ini_set_int(const char *section, const char *key, int value);   /* into Settings.ini (or bf1942patch.ini) */
+void bf_ini_set_str(const char *section, const char *key, const char *value);
 
 void *bf_hook_import(const char *dll, const char *name, void *replacement);  /* returns the old target */
 void *bf_hook_import_in(HMODULE module, const char *dll, const char *name, void *replacement);
@@ -67,6 +68,7 @@ void bf_widescreen_install(void);    /* widescreen.c: Hor+ view and the HUD at i
 void bf_gamepad_install(void);       /* gamepad.c: SDL gamepads */
 void bf_framerate_install(void);     /* framerate.c: no 60 / 100 fps cap, HUD timing in real time */
 void bf_detail_install(void);        /* detail.c: mesh, tree and terrain LOD farther out (not the view distance) */
+void bf_voice_install(void);         /* voice.c: voice chat (LANCommander Comms), its HUD, keys and sound options */
 
 /* restart.c: exported for rundll32 (the helper that bridges a restart) */
 void CALLBACK bf_restart_helper(HWND hwnd, HINSTANCE inst, LPSTR cmdline, int show);
@@ -79,6 +81,11 @@ void *bf_gamepad_wrap_dinput(const GUID *iid, void *direct_input);
 int bf_string_init(void *mem, const char *s);   /* 0 if bfcprt.dll lacks the functions */
 void bf_string_free(void *mem);
 const char *bf_string_chars(const void *s);
+/* the game's std::wstring (basic_string<unsigned short>: the same 28 bytes, 8 characters inline) */
+int bf_wstring_init(void *mem, const wchar_t *s);
+void bf_wstring_free(void *mem);
+const wchar_t *bf_wstring_chars(const void *s);
+typedef struct { BYTE b[28]; } bf_msvc_string;   /* either, passed by value to the game's functions (callee destroys) */
 
 /* menu.c: the HUD scale in percent (the General options slider, bf1942patch.hudScale, [Widescreen] HudScale) */
 int bf_hud_scale(void);
@@ -118,6 +125,78 @@ BYTE *bf_meme_add_row(const bf_meme_row *row, const BYTE *src, DWORD size, DWORD
 int bf_menu_add_row(const char *page, const bf_meme_row *row, const char *what);   /* 0 if the opener is not hooked */
 /* binds the menu variable <path>/<name> to *var (a page's registerVariables, page+4 is the meme manager) */
 int bf_menu_bind_int(void *page, const char *path, const char *name, int *var);
+/* a text variable <path>/<name> (WstringData) starting as text; returns its data node, NULL if it failed */
+void *bf_menu_bind_wstring(void *page, const char *path, const char *name, const wchar_t *text);
+void bf_menu_set_wstring(void *page, void *node, const wchar_t *text);   /* new text for a bound one */
+/* the same with the meme manager itself (the in-game HUD's variables are in BfMenu's, not a page's) */
+enum { BF_MENU_INT, BF_MENU_BOOL, BF_MENU_FLOAT };
+int bf_meme_bind(void *mgr, const char *path, const char *name, int type, void *var);
+void *bf_meme_bind_wstring(void *mgr, const char *path, const char *name, const wchar_t *text);
+void bf_meme_set_wstring(void *mgr, void *node, const wchar_t *text);
+
+/* menu.c: rows grafted onto a page as the game opens it: copies of a row's content from the page itself or from
+ * another page (the donor), with whole nodes replaced and some bytes changed, hung one after the other on a NULL
+ * next. Every node of the content is listed (but NULLs and the inside of replaced nodes) with its class, so the
+ * copy's string indices are moved to the page's string table (names it lacks are added) and the nodes around a
+ * replaced one get its new size. Offsets are into the files as shipped; any other version is left alone. */
+typedef struct { DWORD at; const char *cls; } bf_meme_node;   /* cls without "dice::meme::" */
+
+enum { BF_MEME_NULL, BF_MEME_INT, BF_MEME_WSTRING, BF_MEME_STRING, BF_MEME_BOOL, BF_MEME_FLOAT, BF_MEME_CLASS,
+       BF_MEME_PICTURE };
+typedef struct {
+    DWORD at;                        /* the node replaced (one of the listed nodes) */
+    const char *was_var;             /* its variable as shipped, or NULL (not checked) */
+    int kind;                        /* what it becomes: */
+    const char *var;                 /* INT, BOOL, FLOAT, WSTRING: bound to var (INT, BOOL, FLOAT: NULL = a constant) */
+    int value;                       /* INT, BOOL */
+    const char *text;                /* STRING: a literal StringData; CLASS: the same node as another class
+                                      * (dice::meme::<text>, of the same layout); PICTURE: a PictureNode of texture text */
+    float real;                      /* FLOAT */
+} bf_meme_edit;
+
+/* a row content to copy, and every node of it (but NULLs and the inside of replaced ones), in file order */
+typedef struct {
+    DWORD content, content_len;
+    const bf_meme_node *nodes;
+    DWORD n_nodes;
+    const char *donor;               /* the page it is in; NULL = the graft's donor */
+    DWORD donor_size, donor_strings_end;
+} bf_meme_piece;
+
+typedef struct {
+    float rect[4];                   /* the row's box */
+    const bf_meme_edit *edits;       /* in file order */
+    DWORD n_edits;
+    const bf_meme_bytes *bytes;      /* bytes changed in the copy (outside the replaced nodes) */
+    DWORD n_bytes;
+    const bf_meme_piece *piece;      /* the content copied; NULL = the graft's */
+} bf_meme_graft_row;
+
+typedef struct {
+    DWORD size, strings_end;         /* the page as shipped, the 0 that ends its string table */
+    DWORD hang_at;                   /* the NULL next the rows are hung on */
+    const DWORD *ancestors;          /* every node around hang_at */
+    DWORD n_ancestors;
+    const char *donor;               /* the page the content is copied from; NULL = this one */
+    DWORD donor_size, donor_strings_end;
+    DWORD content, content_len;      /* the row content copied, in the donor */
+    const bf_meme_node *nodes;       /* in file order, the first one is the content */
+    DWORD n_nodes;
+    const bf_meme_graft_row *rows;
+    DWORD n_rows;
+} bf_meme_graft;
+
+/* an opened donor page */
+typedef struct {
+    const char *name;
+    const BYTE *data;
+    DWORD size;
+} bf_meme_donor;
+
+/* the page with the rows; malloc'd, or NULL if a file is not the one the graft was worked out on */
+BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *page, DWORD size, const bf_meme_donor *donors,
+                         int n_donors, DWORD *out_size);
+int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what);   /* 0 if the opener is not hooked */
 
 /* window.c: the game's main window (NULL until it exists) and the rectangle of the monitor it is on */
 HWND bf_game_window(void);

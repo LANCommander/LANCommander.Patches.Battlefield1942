@@ -247,6 +247,14 @@ void bf_ini_set_int(const char *section, const char *key, int value)
     }
 }
 
+void bf_ini_set_str(const char *section, const char *key, const char *value)
+{
+    const char *file = bf_user_ini_file();
+    if (!file || !WritePrivateProfileStringA(section, key, value, file)) {
+        bf_log("settings: cannot write [%s] %s=%s", section, key, value);
+    }
+}
+
 static int exe_is_supported(void)
 {
     const IMAGE_DOS_HEADER *dos = (const IMAGE_DOS_HEADER *)GetModuleHandleA(NULL);
@@ -301,7 +309,10 @@ static void scaffold_user_ini(void)
           "; Key=XXXX-XXXX-XXXX-XXXX-XXXX\n"
           ";\n"
           "; [Widescreen]\n"
-          "; HudScale=100\n", f);
+          "; HudScale=100\n"
+          ";\n"
+          "; [Voice]\n"
+          "; ProximityKey=IDKey_Capital\n", f);
     fclose(f);
     bf_log("settings: created %s", path);
 }
@@ -320,6 +331,7 @@ void bf_install(void)
     bf_gamepad_install();
     bf_framerate_install();
     bf_detail_install();
+    bf_voice_install();
 }
 
 const char *bf_log_file(void)
@@ -400,4 +412,43 @@ const char *bf_string_chars(const void *s)
 {
     const BYTE *p = s;
     return *(const DWORD *)(p + 0x18) < 16 ? (const char *)(p + 4) : *(const char *const *)(p + 4);
+}
+
+/* ---------------------------------------------------------------- the game's std::wstring (basic_string<unsigned short>) */
+
+typedef void (__attribute__((thiscall)) *wstring_ctor_fn)(void *self, const wchar_t *s);
+static wstring_ctor_fn g_wstring_ctor;
+static string_dtor_fn g_wstring_dtor;
+
+static int wstring_fns(void)
+{
+    if (!g_wstring_ctor) {
+        HMODULE cprt = GetModuleHandleA("bfcprt.dll");
+        g_wstring_ctor = (wstring_ctor_fn)(void (*)(void))GetProcAddress(cprt, "??0?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAE@PBG@Z");
+        g_wstring_dtor = (string_dtor_fn)(void (*)(void))GetProcAddress(cprt, "??1?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@QAE@XZ");
+    }
+    return g_wstring_ctor && g_wstring_dtor;
+}
+
+int bf_wstring_init(void *mem, const wchar_t *s)
+{
+    if (!wstring_fns()) {
+        return 0;
+    }
+    g_wstring_ctor(mem, s);
+    return 1;
+}
+
+void bf_wstring_free(void *mem)
+{
+    if (wstring_fns()) {
+        g_wstring_dtor(mem);
+    }
+}
+
+/* the same layout as std::string, with room for 8 characters inline */
+const wchar_t *bf_wstring_chars(const void *s)
+{
+    const BYTE *p = s;
+    return *(const DWORD *)(p + 0x18) < 8 ? (const wchar_t *)(p + 4) : *(const wchar_t *const *)(p + 4);
 }

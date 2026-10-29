@@ -26,7 +26,7 @@ jobs:
         with:
           msystem: MINGW32
           update: true
-          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 pkgconf zip
+          install: mingw-w64-i686-gcc mingw-w64-i686-SDL2 pkgconf zip curl
 
       - name: Version
         run: |
@@ -43,12 +43,21 @@ jobs:
         run: BF_VERSION="$VERSION" sh build.sh
 
       - name: Package
+        env:
+          COMMS_DLL_URL: ${{ vars.COMMS_DLL_URL }}
         run: |
           mkdir -p out/dinput8/bf1942patch out/asi/bf1942patch out/interposer/.interposer/Plugins out/interposer/bf1942patch
           cp build/dinput8.dll dist/bf1942patch.ini out/dinput8/
           cp build/bf1942patch.asi dist/bf1942patch.ini out/asi/
           cp build/LANCommander.Interposer.Plugin.Battlefield1942.dll out/interposer/.interposer/Plugins/
+          # the voice library (LANCommander.Comms.dll, 32-bit), if the repository says where to get it
+          if [ -n "$COMMS_DLL_URL" ]; then
+            curl -fsSL "$COMMS_DLL_URL" -o LANCommander.Comms.dll
+          fi
           for d in dinput8 asi interposer; do
+            if [ -f LANCommander.Comms.dll ]; then
+              cp LANCommander.Comms.dll out/$d/bf1942patch/
+            fi
             cp LICENSE out/$d/bf1942patch/LICENSE.txt
             cp README.md out/$d/bf1942patch/README.md
             cp dist/cdkey.example out/$d/bf1942patch/cdkey.example

@@ -16,7 +16,16 @@
  *   splice relies on is checked first; any other version of the file is left alone. The variable is bound to the
  *   patch's own int by GeneralOptions::registerVariables (0x6d4d10, vtable slot 0x923968), which runs before the
  *   page loads, through bindInt (0x69eb50). The slider writes the int as it moves, so the HUD follows live.
- * The starting value is [Widescreen] HudScale (default 100); a profile's saved value wins. */
+ * The starting value is [Widescreen] HudScale (default 100); a profile's saved value wins.
+ *
+ * The other modules add rows to the options pages the same way: bf_menu_add_row (one copied row, framerate.c), and
+ * bf_menu_graft (voice_menu.c) for rows copied from another page (opened through the original opener as the donor
+ * and closed again: the stream's deleting destructor, vtable slot 0), with whole nodes replaced by new ones (a NULL,
+ * an IntData, a WstringData bound to a variable, a literal StringData). Every node of the copied content is listed
+ * with its class, so the copy's string indices (class names and variables) are moved to the page's table, which
+ * gets the names it lacks at its end, and the nodes around a replaced one get its new size. Text variables are
+ * bound by bindWstring (0x69b8f0, like bindInt) and changed through their data node (vtable +0x50, set(manager,
+ * text)). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,6 +177,70 @@ int bf_menu_bind_int(void *page, const char *path, const char *name, int *var)
     return ok;
 }
 
+#define BIND_WSTRING    0x69b8f0u    /* __fastcall(meme manager, std::wstring *, const std::string *name, const std::string *path) */
+#define WSTRING_SET     0x50         /* the data node's vtable: set(manager, const wchar_t *) */
+
+/* the node copies the text (only its c_str is read), so a temporary std::wstring does */
+void *bf_meme_bind_wstring(void *mgr, const char *path, const char *name, const wchar_t *text)
+{
+    typedef void *(__attribute__((fastcall)) *bind_wstring_fn)(void *mgr, void *var, const void *name, const void *path);
+    BYTE n[BF_STRING_SIZE], p[BF_STRING_SIZE], w[BF_STRING_SIZE];
+    void *node = NULL;
+    if (!bf_wstring_init(w, text)) {
+        return NULL;
+    }
+    if (bf_string_init(n, name)) {
+        if (bf_string_init(p, path)) {
+            node = ((bind_wstring_fn)BF_ADDR(BIND_WSTRING))(mgr, w, n, p);
+            bf_string_free(p);
+        }
+        bf_string_free(n);
+    }
+    bf_wstring_free(w);
+    return node;
+}
+
+void bf_meme_set_wstring(void *mgr, void *node, const wchar_t *text)
+{
+    if (node) {
+        ((void (__attribute__((thiscall)) *)(void *, void *, const wchar_t *))(*(void ***)node)[WSTRING_SET / 4])(
+            node, mgr, text);
+    }
+}
+
+void *bf_menu_bind_wstring(void *page, const char *path, const char *name, const wchar_t *text)
+{
+    void *node = bf_meme_bind_wstring(*(void **)((BYTE *)page + 4), path, name, text);
+    bf_log("menu: %s/%s %s", path, name, node ? "bound" : "not bound");
+    return node;
+}
+
+void bf_menu_set_wstring(void *page, void *node, const wchar_t *text)
+{
+    bf_meme_set_wstring(*(void **)((BYTE *)page + 4), node, text);
+}
+
+/* a variable bound to *var, as bindInt does it: the data object (operator new 0x7ecb40; IntData 0x7e9be0, BoolData
+ * 0x7e3500, FloatData 0x7e4730, thiscall(object, var, name)) registered under path (0x7ebb70, thiscall(manager,
+ * object, path)) */
+#define MEME_NEW      0x7ecb40u
+#define MEME_REGISTER 0x7ebb70u
+
+int bf_meme_bind(void *mgr, const char *path, const char *name, int type, void *var)
+{
+    static const struct { uint32_t ctor; size_t size; } TYPES[] = {{0x7e9be0, 0x14}, {0x7e3500, 0x10}, {0x7e4730, 0x14}};
+    void *obj = ((void *(__cdecl *)(size_t))BF_ADDR(MEME_NEW))(TYPES[type].size);
+    if (!obj) {
+        return 0;
+    }
+    obj = ((void *(__attribute__((thiscall)) *)(void *, void *, const char *))BF_ADDR(TYPES[type].ctor))(obj, var, name);
+    if (!obj) {
+        return 0;
+    }
+    ((void (__attribute__((thiscall)) *)(void *, void *, const char *))BF_ADDR(MEME_REGISTER))(mgr, obj, path);
+    return 1;
+}
+
 static int __attribute__((thiscall)) hk_register_vars(void *page)
 {
     int r = ((int (__attribute__((thiscall)) *)(void *))BF_ADDR(REGISTER_VARS))(page);
@@ -311,53 +384,532 @@ BYTE *bf_meme_add_row(const bf_meme_row *row, const BYTE *src, DWORD size, DWORD
     return out;
 }
 
+/* ---------------------------------------------------------------- grafted rows */
+
+#define MAX_STRINGS 1024
+#define MAX_ADDED   96
+
+/* a MemeFile's string table: the offset of each entry (index 1..n), its length byte first */
+typedef struct {
+    const BYTE *f;
+    DWORD at[MAX_STRINGS];
+    int n;
+    char added[MAX_ADDED][64];       /* names appended to the table (only for the page) */
+    int n_added;
+} meme_strings;
+
+static int read_strings(meme_strings *t, const BYTE *f, DWORD size, DWORD strings_end)
+{
+    DWORD at = 13;
+    t->f = f;
+    t->n = 0;
+    t->n_added = 0;
+    if (size < 16 || memcmp(f, "\x0cMemeFile 2.0", 13) || strings_end >= size) {
+        return 0;
+    }
+    while (at < strings_end && f[at]) {
+        if (t->n == MAX_STRINGS - 1) {
+            return 0;
+        }
+        t->at[++t->n] = at;
+        at += 1 + f[at];
+    }
+    return at == strings_end && f[at] == 0;
+}
+
+static int string_is(const meme_strings *t, int i, const char *prefix, const char *s)
+{
+    size_t lp = prefix ? strlen(prefix) : 0, ls = strlen(s);
+    const BYTE *e;
+    if (i < 1 || i > t->n) {
+        return 0;
+    }
+    e = t->f + t->at[i];
+    return e[0] == lp + ls && (!lp || !memcmp(e + 1, prefix, lp)) && !memcmp(e + 1 + lp, s, ls);
+}
+
+/* the index of name in the page's table, added at its end if it is not there; 0 if the table is full */
+static int string_index(meme_strings *t, const char *name)
+{
+    int i;
+    for (i = 1; i <= t->n; i++) {
+        if (string_is(t, i, NULL, name)) {
+            return i;
+        }
+    }
+    for (i = 0; i < t->n_added; i++) {
+        if (!strcmp(t->added[i], name)) {
+            return t->n + 1 + i;
+        }
+    }
+    if (t->n_added == MAX_ADDED || strlen(name) >= sizeof t->added[0]) {
+        return 0;
+    }
+    strcpy(t->added[t->n_added++], name);
+    return t->n + t->n_added;
+}
+
+/* the donor's string i in the page's table (0 stays 0); -1 if there is no room */
+static int move_index(meme_strings *page, const meme_strings *donor, int i)
+{
+    char name[256];
+    const BYTE *e;
+    if (!i) {
+        return 0;
+    }
+    if (i > donor->n) {
+        return -1;
+    }
+    e = donor->f + donor->at[i];
+    memcpy(name, e + 1, e[0]);
+    name[e[0]] = '\0';
+    return string_index(page, name) ? string_index(page, name) : -1;
+}
+
+/* the size of a replacement node for one of was bytes (at most that plus 300) */
+static DWORD edit_len(const bf_meme_edit *e, DWORD was)
+{
+    switch (e->kind) {
+    case BF_MEME_NULL:
+        return 8;
+    case BF_MEME_STRING:
+        return 12 + (DWORD)strlen(e->text);
+    case BF_MEME_BOOL:
+        return 9;
+    case BF_MEME_CLASS:
+        return was;
+    case BF_MEME_PICTURE:
+        return 17 + (DWORD)strlen(e->text);   /* {next = NULL, the texture: u8 length, characters} */
+    default:
+        return 12;
+    }
+}
+
+/* the content a row copies */
+static const bf_meme_piece *piece_of(const bf_meme_graft *g, const bf_meme_graft_row *r, bf_meme_piece *own)
+{
+    own->content = g->content;
+    own->content_len = g->content_len;
+    own->nodes = g->nodes;
+    own->n_nodes = g->n_nodes;
+    own->donor = g->donor;
+    own->donor_size = g->donor_size;
+    own->donor_strings_end = g->donor_strings_end;
+    return r->piece ? r->piece : own;
+}
+
+/* the piece is in the donor, its first node is the content, and node i's class is dice::meme::<cls> */
+static int piece_ok(const bf_meme_piece *pc, const meme_strings *d, DWORD size)
+{
+    DWORD end = pc->content + pc->content_len, i, len;
+    if (!pc->n_nodes || pc->n_nodes > 256 || pc->content < 13 || end > size || pc->nodes[0].at != pc->content
+        || rd32(d->f + pc->content) != pc->content_len) {
+        return 0;
+    }
+    for (i = 0; i < pc->n_nodes; i++) {
+        const bf_meme_node *n = &pc->nodes[i];
+        if (n->at < pc->content || n->at + 8 > end || (i && n->at <= pc->nodes[i - 1].at)) {
+            return 0;
+        }
+        len = rd32(d->f + n->at);
+        if (len < 8 || n->at + len > end || !string_is(d, *(const WORD *)(d->f + n->at + 6), "dice::meme::", n->cls)) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* a data node {size, variable, class, value} of the page's dice::meme::<cls>; 0 if the table is full */
+static int data_node(BYTE *p, meme_strings *page, const char *var, const char *cls)
+{
+    char name[64];
+    int a = var ? string_index(page, var) : 0, c;
+    snprintf(name, sizeof name, "dice::meme::%s", cls);
+    c = string_index(page, name);
+    wr16(p + 4, (WORD)a);
+    wr16(p + 6, (WORD)c);
+    return (!var || a) && c;
+}
+
+/* row r's copy of its content into out (room for content_len plus the replacements); returns its length, 0 if a
+ * table does not fit the file */
+static DWORD graft_content(const bf_meme_piece *pc, const bf_meme_graft_row *r, meme_strings *page, meme_strings *donor,
+                           BYTE *out, DWORD *out_at)
+{
+    const BYTE *src = donor->f;
+    DWORD end = pc->content + pc->content_len, pos = pc->content, q = 0, i, k, e = 0;
+    int delta[256];
+    for (i = 0; i < pc->n_nodes; i++) {
+        const bf_meme_node *n = &pc->nodes[i];
+        DWORD len = rd32(src + n->at);
+        int a, c;
+        if (n->at < pos) {
+            return 0;                /* inside a replaced node */
+        }
+        memcpy(out + q, src + pos, n->at - pos);
+        q += n->at - pos;
+        out_at[i] = q;
+        delta[i] = 0;
+        if (e < r->n_edits && r->edits[e].at == n->at) {
+            const bf_meme_edit *x = &r->edits[e++];
+            BYTE *p = out + q;
+            DWORD nl = edit_len(x, len);
+            if (x->was_var && !string_is(donor, *(const WORD *)(src + n->at + 4), NULL, x->was_var)) {
+                return 0;
+            }
+            wr32(p, nl);
+            switch (x->kind) {
+            case BF_MEME_NULL:
+                memset(p + 4, 0, 4);
+                break;
+            case BF_MEME_INT:
+                wr32(p + 8, (DWORD)x->value);
+                if (!data_node(p, page, x->var, "IntData")) {
+                    return 0;
+                }
+                break;
+            case BF_MEME_BOOL:
+                p[8] = (BYTE)(x->value != 0);
+                if (!data_node(p, page, x->var, "BoolData")) {
+                    return 0;
+                }
+                break;
+            case BF_MEME_FLOAT:
+                memcpy(p + 8, &x->real, 4);
+                if (!data_node(p, page, x->var, "FloatData")) {
+                    return 0;
+                }
+                break;
+            case BF_MEME_WSTRING:
+                wr32(p + 8, 0);      /* no characters */
+                if (!data_node(p, page, x->var, "WstringData")) {
+                    return 0;
+                }
+                break;
+            case BF_MEME_CLASS:      /* the node as it is, but its class (and so its variable moved too) */
+                memcpy(p, src + n->at, len);
+                a = move_index(page, donor, *(const WORD *)(src + n->at + 4));
+                if (a < 0 || !data_node(p, page, NULL, x->text)) {
+                    return 0;
+                }
+                wr16(p + 4, (WORD)a);
+                break;
+            case BF_MEME_PICTURE:
+                memcpy(p + 8, "\x08\0\0\0\0\0\0\0", 8);
+                p[16] = (BYTE)strlen(x->text);
+                memcpy(p + 17, x->text, strlen(x->text));
+                if (strlen(x->text) > 255 || !data_node(p, page, NULL, "PictureNode")) {
+                    return 0;
+                }
+                break;
+            default:
+                wr32(p + 8, (DWORD)strlen(x->text));
+                memcpy(p + 12, x->text, strlen(x->text));
+                if (!data_node(p, page, NULL, "StringData")) {
+                    return 0;
+                }
+            }
+            delta[i] = (int)nl - (int)len;
+            q += nl;
+            pos = n->at + len;
+            continue;
+        }
+        a = move_index(page, donor, *(const WORD *)(src + n->at + 4));
+        c = move_index(page, donor, *(const WORD *)(src + n->at + 6));
+        if (a < 0 || c <= 0) {
+            return 0;
+        }
+        memcpy(out + q, src + n->at, 8);
+        wr16(out + q + 4, (WORD)a);
+        wr16(out + q + 6, (WORD)c);
+        q += 8;
+        pos = n->at + 8;
+    }
+    if (e != r->n_edits) {
+        return 0;                    /* an edit of a node that is not listed */
+    }
+    memcpy(out + q, src + pos, end - pos);
+    q += end - pos;
+    /* the changed bytes, at their place in the copy */
+    for (k = 0; k < r->n_bytes; k++) {
+        const bf_meme_bytes *b = &r->bytes[k];
+        DWORD at = b->at - pc->content;
+        if (b->at < pc->content || b->at + b->len > end || memcmp(src + b->at, b->was, b->len)) {
+            return 0;
+        }
+        /* moved by the replaced nodes before it */
+        for (i = 0; i < pc->n_nodes; i++) {
+            DWORD len = rd32(src + pc->nodes[i].at);
+            if (delta[i] && pc->nodes[i].at + len <= b->at) {
+                at = (DWORD)((int)at + delta[i]);
+            } else if (delta[i] && pc->nodes[i].at < b->at + b->len) {
+                return 0;            /* inside a replaced node */
+            }
+        }
+        if (b->now) {
+            memcpy(out + at, b->now, b->len);
+        }
+    }
+    /* every node around a replaced one grows (or shrinks) by its new size */
+    for (i = 0; i < pc->n_nodes; i++) {
+        DWORD len = rd32(src + pc->nodes[i].at);
+        int grow = 0;
+        for (k = i + 1; k < pc->n_nodes; k++) {
+            if (delta[k] && pc->nodes[k].at < pc->nodes[i].at + len) {
+                grow += delta[k];
+            }
+        }
+        if (!delta[i]) {             /* (a replacement already has its size) */
+            wr32(out + out_at[i], (DWORD)((int)len + grow));
+        }
+    }
+    return q;
+}
+
+#define MAX_DONORS 4
+
+/* the string table of the piece's donor (the page itself without one), read the first time; NULL if it is not there */
+static meme_strings *donor_of(const bf_meme_piece *pc, meme_strings *page, DWORD size, const bf_meme_donor *donors,
+                              int n_donors, meme_strings **tables, DWORD *donor_size)
+{
+    int i;
+    if (!pc->donor) {
+        *donor_size = size;
+        return page;
+    }
+    for (i = 0; i < n_donors && i < MAX_DONORS; i++) {
+        if (_stricmp(donors[i].name, pc->donor)) {
+            continue;
+        }
+        if (donors[i].size != pc->donor_size) {
+            return NULL;
+        }
+        if (!tables[i] && (!(tables[i] = malloc(sizeof *tables[i]))
+                           || !read_strings(tables[i], donors[i].data, donors[i].size, pc->donor_strings_end))) {
+            return NULL;
+        }
+        *donor_size = donors[i].size;
+        return tables[i];
+    }
+    return NULL;
+}
+
+BYTE *bf_meme_graft_rows(const bf_meme_graft *g, const BYTE *src, DWORD size, const bf_meme_donor *donors,
+                         int n_donors, DWORD *out_size)
+{
+    static const BYTE null_next[8] = {8, 0, 0, 0, 0, 0, 0, 0};
+    meme_strings *page = malloc(sizeof *page), *tables[MAX_DONORS] = {NULL, NULL, NULL, NULL}, *donor;
+    BYTE *rows = NULL, *out = NULL, *p;
+    DWORD *out_at = NULL, room = 0, rows_len = 0, added = 0, i, at, donor_size;
+    DWORD row_at[32], row_len[32];
+    bf_meme_piece own;
+    int tn;
+    if (!page || g->n_rows > 32) {
+        goto done;
+    }
+    if (size != g->size || !read_strings(page, src, size, g->strings_end) || g->hang_at + 8 > size
+        || memcmp(src + g->hang_at, null_next, 8)) {
+        goto done;
+    }
+    for (i = 0; i < g->n_ancestors; i++) {
+        DWORD a = g->ancestors[i];
+        if (!(a > g->strings_end && a < g->hang_at && g->hang_at < a + rd32(src + a))) {
+            goto done;
+        }
+    }
+    /* the rows' contents, last row first: row k = TransformNode {next = row k+1 (or NULL), rect, content} */
+    for (i = 0; i < g->n_rows; i++) {
+        const bf_meme_piece *pc = piece_of(g, &g->rows[i], &own);
+        DWORD k;
+        if (!(donor = donor_of(pc, page, size, donors, n_donors, tables, &donor_size))
+            || !piece_ok(pc, donor, donor_size)) {
+            goto done;
+        }
+        room += 32 + pc->content_len;
+        for (k = 0; k < g->rows[i].n_edits; k++) {
+            room += edit_len(&g->rows[i].edits[k], pc->content_len);
+        }
+    }
+    room += 8;
+    if (!(rows = malloc(room)) || !(out_at = malloc(256 * sizeof *out_at))) {
+        goto done;
+    }
+    at = 0;
+    for (i = 0; i < g->n_rows; i++) {
+        const bf_meme_piece *pc = piece_of(g, &g->rows[i], &own);
+        row_at[i] = at;
+        donor = donor_of(pc, page, size, donors, n_donors, tables, &donor_size);
+        if (!(row_len[i] = graft_content(pc, &g->rows[i], page, donor, rows + at, out_at))) {
+            goto done;
+        }
+        at += row_len[i];
+    }
+    tn = string_index(page, "dice::meme::TransformNode");
+    if (!tn) {
+        goto done;
+    }
+    /* nest them: built back to front in a second buffer */
+    {
+        BYTE *chain = malloc(room);
+        DWORD len = 8;
+        if (!chain) {
+            goto done;
+        }
+        memcpy(chain, null_next, 8);
+        for (i = g->n_rows; i-- > 0;) {
+            DWORD total = 8 + len + 16 + row_len[i];
+            memmove(chain + 8, chain, len);
+            p = chain;
+            wr32(p, total);
+            wr16(p + 4, 0);
+            wr16(p + 6, (WORD)tn);
+            memcpy(p + 8 + len, g->rows[i].rect, 16);
+            memcpy(p + 8 + len + 16, rows + row_at[i], row_len[i]);
+            len = total;
+        }
+        free(rows);
+        rows = chain;
+        rows_len = len;
+    }
+    for (i = 0; i < (DWORD)page->n_added; i++) {
+        added += 1 + (DWORD)strlen(page->added[i]);
+    }
+    *out_size = size + added + rows_len - 8;
+    if (!(out = malloc(*out_size))) {
+        goto done;
+    }
+    /* the table with its new names, the page up to hang_at (its ancestors grown), the rows, the rest */
+    memcpy(out, src, g->strings_end);
+    at = g->strings_end;
+    for (i = 0; i < (DWORD)page->n_added; i++) {
+        DWORD l = (DWORD)strlen(page->added[i]);
+        out[at++] = (BYTE)l;
+        memcpy(out + at, page->added[i], l);
+        at += l;
+    }
+    memcpy(out + at, src + g->strings_end, g->hang_at - g->strings_end);
+    for (i = 0; i < g->n_ancestors; i++) {
+        p = out + g->ancestors[i] + added;
+        wr32(p, rd32(p) + rows_len - 8);
+    }
+    at += g->hang_at - g->strings_end;
+    memcpy(out + at, rows, rows_len);
+    at += rows_len;
+    memcpy(out + at, src + g->hang_at + 8, size - g->hang_at - 8);
+done:
+    free(page);
+    for (i = 0; i < MAX_DONORS; i++) {
+        free(tables[i]);
+    }
+    free(rows);
+    free(out_at);
+    return out;
+}
+
+/* ---------------------------------------------------------------- the opener */
+
 typedef void *(__attribute__((thiscall)) *open_fn)(void *mgr, const char *name);
 typedef void *(__attribute__((thiscall)) *buf_data_fn)(void *buf);
 typedef void (__attribute__((thiscall)) *buf_resize_fn)(void *buf, DWORD size);
 
 static open_fn g_menu_open;
 
-#define MAX_SPLICES 4
-static struct { const char *page; const bf_meme_row *row; const char *what; } g_splices[MAX_SPLICES];
+#define MAX_SPLICES 8
+static struct { const char *page; const bf_meme_row *row; const bf_meme_graft *graft; const char *what; } g_splices[MAX_SPLICES];
 static int g_nsplices;
 
-static void *__attribute__((thiscall)) hk_menu_open(void *mgr, const char *name)
+/* the bytes of an opened menu stream, if size of them can be read */
+static BYTE *stream_data(void *is, DWORD size)
 {
-    void *is = g_menu_open(mgr, name);
-    void *buf;
-    BYTE *data, *patched;
-    DWORD size;
-    int i;
-    if (!is || !name) {
-        return is;
-    }
-    for (i = 0; i < g_nsplices && _stricmp(name, g_splices[i].page); i++) {
-    }
-    if (i == g_nsplices) {
-        return is;
-    }
-    buf = *(void **)((BYTE *)is + 8);
-    data = buf ? ((buf_data_fn)(*(void ***)buf)[0x34 / 4])(buf) : NULL;
-    if (!data || IsBadReadPtr(data, g_splices[i].row->size)) {
-        return is;
-    }
-    patched = bf_meme_add_row(g_splices[i].row, data, g_splices[i].row->size, &size);
-    if (!patched) {
-        bf_log("menu: menu/%s is not the one the patch knows, no %s", name, g_splices[i].what);
-        return is;
-    }
+    void *buf = *(void **)((BYTE *)is + 8);
+    BYTE *data = buf ? ((buf_data_fn)(*(void ***)buf)[0x34 / 4])(buf) : NULL;
+    return data && !IsBadReadPtr(data, size) ? data : NULL;
+}
+
+/* the stream's bytes become patched */
+static int stream_replace(void *is, const BYTE *patched, DWORD size)
+{
+    void *buf = *(void **)((BYTE *)is + 8);
+    BYTE *data;
     ((buf_resize_fn)(*(void ***)buf)[0x38 / 4])(buf, size);
     data = ((buf_data_fn)(*(void ***)buf)[0x34 / 4])(buf);
     if (data) {
         memcpy(data, patched, size);
-        bf_log("menu: %s added to menu/%s", g_splices[i].what, name);
     }
-    free(patched);
+    return data != NULL;
+}
+
+/* the graft for an opened page: its donor pages are opened (and closed again: the stream's deleting destructor,
+ * vtable slot 0) through the original opener */
+static BYTE *graft_page(void *mgr, const bf_meme_graft *g, const BYTE *data, DWORD *size)
+{
+    bf_meme_donor donors[MAX_DONORS];
+    void *streams[MAX_DONORS];
+    BYTE *patched = NULL;
+    int n = 0, i, k;
+    DWORD r;
+    for (r = 0; r <= g->n_rows; r++) {
+        /* the graft's donor, then each row's */
+        const char *name = r == g->n_rows ? g->donor : g->rows[r].piece ? g->rows[r].piece->donor : NULL;
+        DWORD dsize = r == g->n_rows ? g->donor_size : g->rows[r].piece ? g->rows[r].piece->donor_size : 0;
+        for (k = 0; name && k < n && _stricmp(donors[k].name, name); k++) {
+        }
+        if (!name || k < n) {
+            continue;
+        }
+        if (n == MAX_DONORS || !(streams[n] = g_menu_open(mgr, name))) {
+            goto done;
+        }
+        donors[n].name = name;
+        donors[n].size = dsize;
+        donors[n].data = stream_data(streams[n], dsize);
+        n++;
+        if (!donors[n - 1].data) {
+            goto done;
+        }
+    }
+    patched = bf_meme_graft_rows(g, data, g->size, donors, n, size);
+done:
+    for (i = 0; i < n; i++) {
+        ((void (__attribute__((thiscall)) *)(void *, int))(*(void ***)streams[i])[0])(streams[i], 1);
+    }
+    return patched;
+}
+
+static void *__attribute__((thiscall)) hk_menu_open(void *mgr, const char *name)
+{
+    void *is = g_menu_open(mgr, name);
+    BYTE *data, *patched;
+    DWORD size, expect;
+    int i;
+    if (!is || !name) {
+        return is;
+    }
+    for (i = 0; i < g_nsplices; i++) {
+        if (_stricmp(name, g_splices[i].page)) {
+            continue;
+        }
+        expect = g_splices[i].row ? g_splices[i].row->size : g_splices[i].graft->size;
+        if (!(data = stream_data(is, expect))) {
+            bf_log("menu: menu/%s is not the one the patch knows, no %s", name, g_splices[i].what);
+            break;                   /* a page changed by an earlier splice is a different size: the rest are skipped */
+        }
+        patched = g_splices[i].row ? bf_meme_add_row(g_splices[i].row, data, expect, &size)
+                                   : graft_page(mgr, g_splices[i].graft, data, &size);
+        if (!patched) {
+            bf_log("menu: menu/%s is not the one the patch knows, no %s", name, g_splices[i].what);
+            break;
+        }
+        if (stream_replace(is, patched, size)) {
+            bf_log("menu: %s added to menu/%s", g_splices[i].what, name);
+        }
+        free(patched);
+        break;                       /* one splice per page */
+    }
     return is;
 }
 
-/* adds row to menu/<page> whenever the game opens it. The opener 0x601e80 is detoured the first time. */
-int bf_menu_add_row(const char *page, const bf_meme_row *row, const char *what)
+static int add_splice(const char *page, const bf_meme_row *row, const bf_meme_graft *graft, const char *what)
 {
     static const BYTE open_head[7] = {0x8b, 0x44, 0x24, 0x04, 0x83, 0xec, 0x38};   /* mov eax,[esp+4]; sub esp,0x38 */
     if (g_nsplices == MAX_SPLICES) {
@@ -368,9 +920,22 @@ int bf_menu_add_row(const char *page, const bf_meme_row *row, const char *what)
     }
     g_splices[g_nsplices].page = page;
     g_splices[g_nsplices].row = row;
+    g_splices[g_nsplices].graft = graft;
     g_splices[g_nsplices].what = what;
     g_nsplices++;
     return 1;
+}
+
+/* adds row to menu/<page> whenever the game opens it. The opener 0x601e80 is detoured the first time. */
+int bf_menu_add_row(const char *page, const bf_meme_row *row, const char *what)
+{
+    return add_splice(page, row, NULL, what);
+}
+
+/* grafts g's rows onto menu/<page> whenever the game opens it (one splice per page) */
+int bf_menu_graft(const char *page, const bf_meme_graft *g, const char *what)
+{
+    return add_splice(page, NULL, g, what);
 }
 
 /* ---------------------------------------------------------------- install */

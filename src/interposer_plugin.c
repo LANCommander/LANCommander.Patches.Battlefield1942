@@ -65,6 +65,19 @@ static const wchar_t DEFAULTS[] =
     L"HideDuplicates: true\n"
     L"StartKey: 0\n"
     L"BackKey: 0\n"
+    L"VoiceChat: true\n"
+    L"VoicePort: 27800\n"
+    L"VoicePassword: \"\"\n"
+    L"VoiceServer: \"\"\n"
+    L"VoiceQueryPorts: \"22000,23000\"\n"
+    L"VoiceActivation: false\n"
+    L"RadioActivation: false\n"
+    L"ProximityKey: IDKey_Capital\n"
+    L"RadioKey: Mouse_IDButton_3\n"
+    L"VoiceVolume: 100\n"
+    L"MicSensitivity: 100\n"
+    L"VoiceHud: true\n"
+    L"VoiceOptions: true\n"
     L"CrashLog: false\n";
 /* Plugins.Battlefield1942 from Config.yml, for Interposer builds whose InterposerGetConfigString is unusable */
 #define MAX_KEYS 64
