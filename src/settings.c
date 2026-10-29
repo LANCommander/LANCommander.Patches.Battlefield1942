@@ -1,100 +1,104 @@
 /* The table of the patch's options, their values, and the bf1942patch.con parser (settings.h). Plain C: the game,
- * the Windows dedicated server and the Linux dedicated server all use it. */
+ * the Windows dedicated server and the Linux dedicated server all use it.
+ * The console names sit with the game's own: game.* (like game.setMinimapTransparency and game.lockFps), renderer.*
+ * (like renderer.fieldOfView), and voiceChat.* for the voice chat. None of them is a name the game has. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "settings.h"
 
-#define I(name, flags, def, section, key) {name, BF_OPT_INT, flags, def, NULL, section, key}
-#define S(name, flags, def, section, key) {name, BF_OPT_STR, flags, 0, def, section, key}
+#define I(name, console, flags, def, section, key) {name, console, BF_OPT_INT, flags, def, NULL, section, key}
+#define S(name, console, flags, def, section, key) {name, console, BF_OPT_STR, flags, 0, def, section, key}
 
 const bf_option bf_options[] = {
-    I("enabled", BF_OPT_READONLY, 1, "General", "Enabled"),
+    I("enabled", "game.patchEnabled", BF_OPT_READONLY, 1, "General", "Enabled"),
     /* saves */
-    I("redirectSaves", BF_OPT_INSTALL | BF_OPT_READONLY, 1, "Saves", "Redirect"),
-    S("saveFolder", BF_OPT_INSTALL | BF_OPT_READONLY, "", "Saves", "Folder"),
-    I("logFiles", 0, 0, "Saves", "LogFiles"),
+    I("redirectSaves", "game.redirectSaves", BF_OPT_INSTALL | BF_OPT_READONLY, 1, "Saves", "Redirect"),
+    S("saveFolder", "game.saveFolder", BF_OPT_INSTALL | BF_OPT_READONLY, "", "Saves", "Folder"),
+    I("logFiles", "game.logFiles", 0, 0, "Saves", "LogFiles"),
     /* registry, CD keys */
-    I("noRegistry", 0, 1, "Registry", "UseFile"),
-    I("logRegistry", 0, 0, "Registry", "LogAccess"),
-    S("cdKey", 0, "", "CDKey", "Key"),
-    S("cdKeyXPack1", 0, "", "CDKey", "XPack1"),
-    S("cdKeyXPack2", 0, "", "CDKey", "XPack2"),
-    S("language", 0, "", "Game", "Language"),
+    I("noRegistry", "game.noRegistry", 0, 1, "Registry", "UseFile"),
+    I("logRegistry", "game.logRegistry", 0, 0, "Registry", "LogAccess"),
+    S("cdKey", "game.cdKey", 0, "", "CDKey", "Key"),
+    S("cdKeyXPack1", "game.cdKeyXPack1", 0, "", "CDKey", "XPack1"),
+    S("cdKeyXPack2", "game.cdKeyXPack2", 0, "", "CDKey", "XPack2"),
+    S("language", "game.installLanguage", 0, "", "Game", "Language"),
     /* network */
-    I("openSpy", 0, 1, "Network", "OpenSpy"),
-    S("masterServer", 0, "", "Network", "MasterServer"),
+    I("openSpy", "game.openSpy", 0, 1, "Network", "OpenSpy"),
+    S("masterServer", "game.masterServer", 0, "", "Network", "MasterServer"),
     /* display */
-    I("borderless", 0, 1, "Display", "Borderless"),
-    I("monitor", 0, 0, "Display", "Monitor"),
-    I("vsync", 0, 0, "Display", "VSync"),
-    I("dpiAware", 0, 1, "Display", "DpiAware"),
-    I("modeFallback", 0, 1, "Display", "ModeFallback"),
-    I("nativeMenus", 0, 1, "Display", "NativeMenus"),
+    I("borderless", "renderer.borderless", 0, 1, "Display", "Borderless"),
+    I("monitor", "renderer.monitor", 0, 0, "Display", "Monitor"),
+    I("vsync", "renderer.vSync", 0, 0, "Display", "VSync"),
+    I("dpiAware", "renderer.dpiAware", 0, 1, "Display", "DpiAware"),
+    I("modeFallback", "renderer.modeFallback", 0, 1, "Display", "ModeFallback"),
+    I("nativeMenus", "renderer.nativeMenus", 0, 1, "Display", "NativeMenus"),
     /* frame rate */
-    I("unlockFps", 0, 1, "FrameRate", "Unlock"),
-    I("maxFps", 0, 0, "FrameRate", "MaxFps"),
-    I("maxFpsOption", 0, 1, "FrameRate", "MaxFpsOption"),
-    I("realTimeHud", 0, 1, "FrameRate", "FixHud"),
+    I("unlockFps", "game.unlockFps", 0, 1, "FrameRate", "Unlock"),
+    I("maxFps", "game.maxFps", 0, 0, "FrameRate", "MaxFps"),
+    I("maxFpsOption", "game.maxFpsOption", 0, 1, "FrameRate", "MaxFpsOption"),
+    I("realTimeHud", "game.realTimeHud", 0, 1, "FrameRate", "FixHud"),
     /* restarts */
-    I("seamlessRestart", 0, 1, "Restart", "Seamless"),
+    I("seamlessRestart", "game.seamlessRestart", 0, 1, "Restart", "Seamless"),
     /* widescreen, HUD */
-    I("horPlus", 0, 1, "Widescreen", "HorPlus"),
-    I("widescreenHud", 0, 1, "Widescreen", "FixHud"),
-    I("anchorHud", 0, 1, "Widescreen", "AnchorHud"),
-    I("hudScale", BF_OPT_PROFILE, 100, "Widescreen", "HudScale"),
-    I("hudScaleOption", 0, 1, "Widescreen", "HudScaleOption"),
+    I("horPlus", "renderer.horPlus", 0, 1, "Widescreen", "HorPlus"),
+    I("widescreenHud", "game.widescreenHud", 0, 1, "Widescreen", "FixHud"),
+    I("anchorHud", "game.anchorHud", 0, 1, "Widescreen", "AnchorHud"),
+    I("hudScale", "game.hudScale", BF_OPT_PROFILE, 100, "Widescreen", "HudScale"),
+    I("hudScaleOption", "game.hudScaleOption", 0, 1, "Widescreen", "HudScaleOption"),
     /* detail */
-    I("meshLod", 0, 300, "Detail", "MeshLod"),
-    I("treeLod", 0, 300, "Detail", "TreeLod"),
-    I("terrainLod", 0, 300, "Detail", "TerrainLod"),
-    I("terrainDetail", 0, 400, "Detail", "TerrainDetail"),
+    I("meshLod", "renderer.meshLod", 0, 300, "Detail", "MeshLod"),
+    I("treeLod", "renderer.treeLod", 0, 300, "Detail", "TreeLod"),
+    I("terrainLod", "renderer.terrainLod", 0, 300, "Detail", "TerrainLod"),
+    I("terrainDetail", "renderer.terrainDetail", 0, 400, "Detail", "TerrainDetail"),
     /* gamepads */
-    I("gamepad", 0, 1, "Gamepad", "UseSDL"),
-    I("gamepadDeadzone", 0, 15, "Gamepad", "Deadzone"),
-    I("gamepadSensitivity", 0, 100, "Gamepad", "Sensitivity"),
-    I("gamepadBindings", 0, 1, "Gamepad", "Bindings"),
-    I("gamepadHideDuplicates", 0, 1, "Gamepad", "HideDuplicates"),
-    I("gamepadStartKey", 0, 0, "Gamepad", "StartKey"),
-    I("gamepadBackKey", 0, 0, "Gamepad", "BackKey"),
+    I("gamepad", "game.gamepad", 0, 1, "Gamepad", "UseSDL"),
+    I("gamepadDeadzone", "game.gamepadDeadzone", 0, 15, "Gamepad", "Deadzone"),
+    I("gamepadSensitivity", "game.gamepadSensitivity", 0, 100, "Gamepad", "Sensitivity"),
+    I("gamepadBindings", "game.gamepadBindings", 0, 1, "Gamepad", "Bindings"),
+    I("gamepadHideDuplicates", "game.gamepadHideDuplicates", 0, 1, "Gamepad", "HideDuplicates"),
+    I("gamepadStartKey", "game.gamepadStartKey", 0, 0, "Gamepad", "StartKey"),
+    I("gamepadBackKey", "game.gamepadBackKey", 0, 0, "Gamepad", "BackKey"),
     /* voice chat */
-    I("voiceChat", 0, 1, "Voice", "VoiceChat"),
-    I("voicePort", 0, 27800, "Voice", "VoicePort"),
-    S("voicePassword", 0, "", "Voice", "VoicePassword"),
-    S("voiceServer", 0, "", "Voice", "VoiceServer"),
-    S("voiceQueryPorts", 0, "22000,23000", "Voice", "VoiceQueryPorts"),
-    I("voiceActivation", 0, 0, "Voice", "VoiceActivation"),
-    I("radioActivation", 0, 0, "Voice", "RadioActivation"),
-    S("proximityKey", 0, "IDKey_Capital", "Voice", "ProximityKey"),
-    S("radioKey", 0, "Mouse_IDButton_3", "Voice", "RadioKey"),
-    I("voiceVolume", 0, 100, "Voice", "VoiceVolume"),
-    I("micSensitivity", 0, 100, "Voice", "MicSensitivity"),
-    S("inputDevice", 0, "", "Voice", "InputDevice"),
-    I("voiceHud", 0, 1, "Voice", "VoiceHud"),
-    I("voiceOptions", 0, 1, "Voice", "VoiceOptions"),
-    I("voiceMuteButton", 0, 1, "Voice", "VoiceMuteButton"),
-    S("voiceLibrary", 0, "", "Voice", "VoiceLibrary"),
+    I("voiceChat", "voiceChat.enabled", 0, 1, "Voice", "VoiceChat"),
+    I("voicePort", "voiceChat.port", 0, 27800, "Voice", "VoicePort"),
+    S("voicePassword", "voiceChat.password", 0, "", "Voice", "VoicePassword"),
+    S("voiceServer", "voiceChat.server", 0, "", "Voice", "VoiceServer"),
+    S("voiceQueryPorts", "game.queryPorts", 0, "22000,23000", "Voice", "VoiceQueryPorts"),   /* FastDL asks too */
+    I("voiceActivation", "voiceChat.voiceActivation", 0, 0, "Voice", "VoiceActivation"),
+    I("radioActivation", "voiceChat.radioActivation", 0, 0, "Voice", "RadioActivation"),
+    S("proximityKey", "voiceChat.proximityKey", 0, "IDKey_Capital", "Voice", "ProximityKey"),
+    S("radioKey", "voiceChat.radioKey", 0, "Mouse_IDButton_3", "Voice", "RadioKey"),
+    I("voiceVolume", "voiceChat.volume", 0, 100, "Voice", "VoiceVolume"),
+    I("micSensitivity", "voiceChat.micSensitivity", 0, 100, "Voice", "MicSensitivity"),
+    S("inputDevice", "voiceChat.inputDevice", 0, "", "Voice", "InputDevice"),
+    I("voiceHud", "voiceChat.hud", 0, 1, "Voice", "VoiceHud"),
+    I("voiceOptions", "voiceChat.options", 0, 1, "Voice", "VoiceOptions"),
+    I("voiceMuteButton", "voiceChat.muteButton", 0, 1, "Voice", "VoiceMuteButton"),
+    S("voiceLibrary", "voiceChat.library", 0, "", "Voice", "VoiceLibrary"),
     /* FastDL: maps and mods the game lacks, downloaded through the Interposer */
-    I("fastDl", 0, 1, "FastDL", "FastDL"),
-    S("fastDlUrl", 0, "", "FastDL", "FastDLUrl"),
+    I("fastDl", "game.fastDl", 0, 1, "FastDL", "FastDL"),
+    S("fastDlUrl", "game.fastDlUrl", 0, "", "FastDL", "FastDLUrl"),
     /* the dedicated server's FastDL server, advertised in its query replies */
-    S("fastDlHost", BF_OPT_SERVER, "", "FastDL", "FastDLHost"),
-    I("fastDlPort", BF_OPT_SERVER, 0, "FastDL", "FastDLPort"),
-    S("fastDlPath", BF_OPT_SERVER, "", "FastDL", "FastDLPath"),
+    S("fastDlHost", "game.fastDlHost", BF_OPT_SERVER, "", "FastDL", "FastDLHost"),
+    I("fastDlPort", "game.fastDlPort", BF_OPT_SERVER, 0, "FastDL", "FastDLPort"),
+    S("fastDlPath", "game.fastDlPath", BF_OPT_SERVER, "", "FastDL", "FastDLPath"),
     /* the dedicated server's voice server */
-    S("voiceBindAddress", BF_OPT_SERVER, "", "Voice", "VoiceBindAddress"),
-    S("voiceAdminKey", BF_OPT_SERVER, "", "Voice", "VoiceAdminKey"),
-    I("voiceMaxPlayers", BF_OPT_SERVER, 256, "Voice", "VoiceMaxPlayers"),
-    I("voiceMaxBitrate", BF_OPT_SERVER, 32000, "Voice", "VoiceMaxBitrate"),
-    S("proximityRange", BF_OPT_SERVER, "50", "Voice", "ProximityRange"),            /* metres, may have decimals */
-    S("proximityFullVolumeRange", BF_OPT_SERVER, "4", "Voice", "ProximityFullVolumeRange"),
-    I("voiceIncludeBots", BF_OPT_SERVER, 0, "Voice", "VoiceIncludeBots"),
-    I("suppressDialogs", BF_OPT_SERVER, 1, "Server", "SuppressDialogs"),
-    I("logToStderr", BF_OPT_SERVER, 0, "Server", "LogToStderr"),
+    S("voiceBindAddress", "voiceChat.bindAddress", BF_OPT_SERVER, "", "Voice", "VoiceBindAddress"),
+    S("voiceAdminKey", "voiceChat.adminKey", BF_OPT_SERVER, "", "Voice", "VoiceAdminKey"),
+    I("voiceMaxPlayers", "voiceChat.maxPlayers", BF_OPT_SERVER, 256, "Voice", "VoiceMaxPlayers"),
+    I("voiceMaxBitrate", "voiceChat.maxBitrate", BF_OPT_SERVER, 32000, "Voice", "VoiceMaxBitrate"),
+    /* metres, may have decimals */
+    S("proximityRange", "voiceChat.proximityRange", BF_OPT_SERVER, "50", "Voice", "ProximityRange"),
+    S("proximityFullVolumeRange", "voiceChat.proximityFullVolumeRange", BF_OPT_SERVER, "4", "Voice",
+      "ProximityFullVolumeRange"),
+    I("voiceIncludeBots", "voiceChat.includeBots", BF_OPT_SERVER, 0, "Voice", "VoiceIncludeBots"),
+    I("suppressDialogs", "game.suppressDialogs", BF_OPT_SERVER, 1, "Server", "SuppressDialogs"),
+    I("logToStderr", "game.logToStderr", BF_OPT_SERVER, 0, "Server", "LogToStderr"),
     /* troubleshooting */
-    I("crashLog", 0, 0, "Debug", "CrashLog"),
-    I("logHud", 0, 0, "Debug", "LogHud"),
-    I("logFps", 0, 0, "Debug", "LogFps"),
+    I("crashLog", "game.crashLog", 0, 0, "Debug", "CrashLog"),
+    I("logHud", "game.logHud", 0, 0, "Debug", "LogHud"),
+    I("logFps", "game.logFps", 0, 0, "Debug", "LogFps"),
 };
 const int bf_n_options = sizeof bf_options / sizeof bf_options[0];
 
@@ -139,6 +143,20 @@ int bf_option_find(const char *name)
     size_t i;
     for (i = 0; i < N_OPTIONS; i++) {
         if (same(bf_options[i].name, name)) {
+            return (int)i;
+        }
+    }
+    return bf_option_find_console(name);
+}
+
+int bf_option_find_console(const char *name)
+{
+    static const char OLD[] = "bf1942patch.";   /* what earlier builds named every option: bf1942patch.<name> */
+    size_t i, k, n = sizeof OLD - 1;
+    for (k = 0; k < n && lower((unsigned char)name[k]) == OLD[k]; k++) {
+    }
+    for (i = 0; i < N_OPTIONS; i++) {
+        if (same(bf_options[i].console, name) || (k == n && same(bf_options[i].name, name + n))) {
             return (int)i;
         }
     }
@@ -286,17 +304,17 @@ static void trim_end(char *s)
 
 int bf_settings_parse_line(char *line, char **value)
 {
-    static const char PREFIX[] = "bf1942patch.";
-    char *s = skip_space(line), *name, *v;
-    size_t n = sizeof PREFIX - 1, k;
+    char *s = skip_space(line), *name = s, *v;
+    int k, dot = 0;
     trim_end(s);
-    for (k = 0; k < n; k++) {
-        if (lower((unsigned char)s[k]) != PREFIX[k]) {
-            return -1;               /* a comment (rem, ;, #, //) or another command */
-        }
+    if (*s == ';' || *s == '#' || *s == '/') {
+        return -1;                   /* a comment (; # //) */
     }
-    name = s + n;
     for (v = name; *v && *v != ' ' && *v != '\t'; v++) {
+        dot |= *v == '.';
+    }
+    if (!dot) {
+        return -1;                   /* rem, run, ...: not an object.name */
     }
     if (!*v) {
         return -1;                   /* no value: a read */
@@ -316,22 +334,20 @@ int bf_settings_parse_line(char *line, char **value)
         *end = '\0';
     }
     *value = v;
-    k = (size_t)bf_option_find(name);
-    if ((int)k < 0) {
-        bf_log("settings: bf1942patch.%s is not an option, skipped", name);
+    if ((k = bf_option_find_console(name)) < 0) {
+        bf_log("settings: %s is not an option, skipped", name);
     }
-    return (int)k;
+    return k;
 }
 
 static int take(int i, const char *value, int user, const char *path)
 {
     if (user && (bf_options[i].flags & BF_OPT_INSTALL)) {
-        bf_log("settings: bf1942patch.%s is only read from the install's bf1942patch.con, not %s", bf_options[i].name,
-               path);
+        bf_log("settings: %s is only read from the install's bf1942patch.con, not %s", bf_options[i].console, path);
         return 0;
     }
     if (bf_option_set(i, value) < 0) {
-        bf_log("settings: bf1942patch.%s %s in %s is not a number, skipped", bf_options[i].name, value, path);
+        bf_log("settings: %s %s in %s is not a number, skipped", bf_options[i].console, value, path);
         return 0;
     }
     if (user) {

@@ -10,10 +10,10 @@
  *   to the game's menus, and every option set in the console or by the game's .con files, are kept here, so they last
  *   when the game restarts itself (for every map). A Settings.ini there is turned into one the first time. The
  *   dedicated server has none;
- * - the console and the game's .con files: bf1942patch.<name> <value>, from the time the game registers its own
- *   console commands (before any .con file runs). Most options take effect when the game next starts (which it does
- *   for every map); the ones a module can apply at once (bf_setting_watch, or bound to the variable it reads,
- *   bf_setting_bind) do so. */
+ * - the console and the game's .con files: <console name> <value> (game.maxFps 144), from the time the game
+ *   registers its own console commands (before any .con file runs). Most options take effect when the game next
+ *   starts (which it does for every map); the ones a module can apply at once (bf_setting_watch, or bound to the
+ *   variable it reads, bf_setting_bind) do so. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,11 +67,11 @@ static void sibling(const char *path, const char *ext, char *out, int size)
 
 static const char USER_HEADER[] =
     "rem Battlefield 1942 options of this player (bf1942patch). Every option of the bf1942patch.con next to the game\n"
-    "rem can be set here too and wins over that file (but redirectSaves and saveFolder). The options the patch adds\n"
-    "rem to the game's menus, and the ones set in the console (bf1942patch.<option> <value>), are kept here.\n"
+    "rem can be set here too and wins over that file (but game.redirectSaves and game.saveFolder). The options the\n"
+    "rem patch adds to the game's menus, and the ones set in the console (game.maxFps 144), are kept here.\n"
     "rem For example:\n"
-    "rem bf1942patch.cdKey \"XXXX-XXXX-XXXX-XXXX-XXXX\"\n"
-    "rem bf1942patch.proximityKey IDKey_Capital\n";
+    "rem game.cdKey \"XXXX-XXXX-XXXX-XXXX-XXXX\"\n"
+    "rem voiceChat.proximityKey IDKey_Capital\n";
 
 /* a new player's file: the header, then the options its Settings.ini had */
 static void write_user_file(const char *path, int from_ini)
@@ -87,7 +87,7 @@ static void write_user_file(const char *path, int from_ini)
     for (i = 0; from_ini && i < bf_n_options; i++) {
         if (bf_option_from_user(i)) {
             bf_option_text(i, text, sizeof text, 1);
-            fprintf(f, "bf1942patch.%s %s\n", bf_options[i].name, text);
+            fprintf(f, "%s %s\n", bf_options[i].console, text);
         }
     }
     fclose(f);
@@ -143,7 +143,7 @@ static void keep(int i)
         return;
     }
     if (!path) {
-        bf_log("settings: no player's file yet, bf1942patch.%s is not kept", bf_options[i].name);
+        bf_log("settings: no player's file yet, %s is not kept", bf_options[i].console);
         return;
     }
     snprintf(tmp, sizeof tmp, "%s.new", path);
@@ -157,7 +157,7 @@ static void keep(int i)
             lstrcpynA(copy, line, sizeof copy);
             if (bf_settings_parse_line(copy, &value) == i) {
                 if (!done) {
-                    fprintf(out, "bf1942patch.%s %s\n", bf_options[i].name, text);
+                    fprintf(out, "%s %s\n", bf_options[i].console, text);
                 }
                 done = 1;
                 continue;
@@ -172,7 +172,7 @@ static void keep(int i)
         fputs(USER_HEADER, out);
     }
     if (!done) {
-        fprintf(out, "bf1942patch.%s %s\n", bf_options[i].name, text);
+        fprintf(out, "%s %s\n", bf_options[i].console, text);
     }
     fclose(out);
     if (!MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING)) {
@@ -207,7 +207,7 @@ void bf_setting_watch(const char *name, void (*fn)(void))
 
 /* ---------------------------------------------------------------- the console */
 
-/* bf1942patch.<name>: prints the value; bf1942patch.<name> <value> sets it and keeps it in the player's file */
+/* <console name>: prints the value; <console name> <value> sets it and keeps it in the player's file */
 static void option_cmd(const char *name, int argc, const char *const *argv, char *out, int size)
 {
     int i = bf_option_find(name), r;
@@ -219,22 +219,22 @@ static void option_cmd(const char *name, int argc, const char *const *argv, char
         return;
     }
     if (bf_options[i].flags & BF_OPT_READONLY) {
-        snprintf(out, size, "bf1942patch.%s is set in %s", name, bf_settings_file());
+        snprintf(out, size, "%s is set in %s", name, bf_settings_file());
         return;
     }
     if ((r = bf_option_set(i, argv[0])) < 0) {
-        snprintf(out, size, "bf1942patch.%s takes a number", name);
+        snprintf(out, size, "%s takes a number", name);
         return;
     }
     if (r == 0) {
         return;
     }
-    bf_log("settings: bf1942patch.%s %s", name, argv[0]);
+    bf_log("settings: %s %s", name, argv[0]);
     keep(i);
     if (i < (int)(sizeof g_watch / sizeof g_watch[0]) && g_watch[i]) {
         g_watch[i]();
     } else if (!bf_option_bound(i)) {
-        snprintf(out, size, "bf1942patch.%s takes effect when the game next starts (the next map)", name);
+        snprintf(out, size, "%s takes effect when the game next starts (the next map)", name);
     }
 }
 
@@ -245,12 +245,14 @@ void bf_settings_console_install(void)
         if (bf_options[i].flags & BF_OPT_SERVER) {
             continue;
         }
-        if (!bf_console_add(bf_options[i].name, bf_options[i].type == BF_OPT_INT ? BF_CONSOLE_INT : BF_CONSOLE_STRING,
+        if (!bf_console_add(bf_options[i].console, bf_options[i].type == BF_OPT_INT ? BF_CONSOLE_INT : BF_CONSOLE_STRING,
                             option_cmd)) {
-            bf_log("settings: cannot add the console command bf1942patch.%s", bf_options[i].name);
+            bf_log("settings: cannot add the console command %s", bf_options[i].console);
             return;
         }
         n++;
     }
-    bf_log("settings: %d options are console commands (bf1942patch.<option> [value])", n);
+    /* the profiles' GeneralOptions.con of earlier builds run bf1942patch.hudScale (menu.c) */
+    bf_console_add("bf1942patch.hudScale", BF_CONSOLE_INT, option_cmd);
+    bf_log("settings: %d options are console commands (game.maxFps [value], ...)", n);
 }

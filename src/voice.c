@@ -1,4 +1,4 @@
-/* bf1942patch.voiceChat: voice chat with the other players on the server, through the LANCommander Interposer's voice API.
+/* voiceChat.enabled: voice chat with the other players on the server, through the LANCommander Interposer's voice API.
  *
  * The voice library is the Interposer, whose interposer_comms_* exports are the former LANCommander Comms: the one
  * that loaded the Interposer plugin build, else the one embedded in the dinput8.dll / ASI builds (the patch's own
@@ -8,7 +8,7 @@
  * - finds the server the game plays on and connects to its voice server as the local player (the server knows
  *   the game's players and only lets each be claimed by its own name / id: the bridge's ids are engine id + 1);
  * - talks to the players nearby while the proximity key is held (or always while the microphone hears speech,
- *   with bf1942patch.voiceActivation 1), and on the team radio while the radio key is held: the server shows each player
+ *   with voiceChat.voiceActivation 1), and on the team radio while the radio key is held: the server shows each player
  *   their own team's group only, which becomes the radio's target;
  * - keeps what the HUD shows up to date (voice_hud.c), and applies the keys and volumes of the menus
  *   (voice_menu.c);
@@ -226,7 +226,8 @@ static void load_key(int which, const char *name)
     }
     g_vk[which] = g_keys[which][0] ? bf_voice_vk(g_keys[which]) : 0;
     if (g_keys[which][0] && !g_vk[which]) {
-        bf_log("voice: bf1942patch.%s %s is not a keyboard key or mouse button", name, g_keys[which]);
+        bf_log("voice: %s %s is not a keyboard key or mouse button", bf_options[bf_option_find(name)].console,
+               g_keys[which]);
     }
 }
 
@@ -338,7 +339,7 @@ const bf_voice_state *bf_voice_now(void)
 
 /* ---------------------------------------------------------------- the microphone */
 
-/* bf1942patch.inputDevice: the capture device's id as the library lists it, "" = the system's default. The Controls
+/* voiceChat.inputDevice: the capture device's id as the library lists it, "" = the system's default. The Controls
  * options' MICROPHONE row (voice_menu.c) steps through the default and every device listed at the time */
 #define MAX_MICS        32
 static char g_mic[256];
@@ -405,7 +406,7 @@ static int create(void)
     config.transmit_mode = INTERPOSER_COMMS_TRANSMIT_PUSH_TO_TALK;   /* update_activation sets it */
     config.voice_activation.auto_threshold = 1;
     if (g_mic[0] && mic < 0) {
-        bf_log("voice: the microphone of bf1942patch.inputDevice is not there, using the default");
+        bf_log("voice: the microphone of voiceChat.inputDevice is not there, using the default");
     }
     config.capture_device_id = mic >= 0 ? g_mic : NULL;
     if (p_comms_client_create(&config, &g_client) != INTERPOSER_COMMS_OK) {
@@ -593,7 +594,7 @@ static void hud_name(char *out, int size, const char *in)
  * whole on every change (0x468740: the path through the app's write path 0x445c40, FileHandle open 0x583a20, write
  * 0x5839f0, close 0x583870), and run through the console whenever a profile loads (0x467c10, called at 0x48fc2d and
  * 0x4939f3: the read path 0x445ad0, the console [0x9a9420] vtable +0x20 run(path, 8 arguments, 0x9a9428)). The mutes
- * are Settings/Profiles/<profile>/VoiceMuteList.con next to it, a bf1942patch.voiceMute "<name>" line per player,
+ * are Settings/Profiles/<profile>/VoiceMuteList.con next to it, a voiceChat.mute "<name>" line per player,
  * written and run the same way (both calls to 0x467c10 are redirected to run it after the buddies). saves.c moves
  * both to the save folder. */
 #define MAX_MUTED       64
@@ -656,7 +657,7 @@ static void save_mutes(void)
     ((fh_fn)BF_ADDR(FH_CTOR))(fh);
     if (((open_fn)BF_ADDR(FH_OPEN))(fh, path, 0, 1, 0)) {
         for (i = 0; i < g_n_muted; i++) {
-            snprintf(text, sizeof text, "bf1942patch.voiceMute \"%s\"\n", g_muted[i]);
+            snprintf(text, sizeof text, "voiceChat.mute \"%s\"\n", g_muted[i]);
             if (bf_string_init(line, text)) {
                 ((write_fn)BF_ADDR(FH_WRITE))(fh, line);
                 bf_string_free(line);
@@ -764,7 +765,7 @@ void bf_voice_set_muted(const char *name, int muted)
     }
 }
 
-/* bf1942patch.voiceMute "<name>" / voiceUnmute "<name>" (the profile's VoiceMuteList.con, or typed) */
+/* voiceChat.mute "<name>" / voiceChat.unmute "<name>" (the profile's VoiceMuteList.con, or typed) */
 static void mute_cmd(const char *cmd, int argc, const char *const *argv, char *out, int size)
 {
     char name[64];
@@ -776,7 +777,7 @@ static void mute_cmd(const char *cmd, int argc, const char *const *argv, char *o
         }
         strncat(name, argv[i], sizeof name - strlen(name) - 1);
     }
-    bf_voice_set_muted(name, !strcmp(cmd, "voiceMute"));
+    bf_voice_set_muted(name, !strcmp(cmd, "voiceChat.mute"));
     (void)out;
     (void)size;
 }
@@ -784,8 +785,8 @@ static void mute_cmd(const char *cmd, int argc, const char *const *argv, char *o
 static void install_mutes(void)
 {
     size_t i;
-    int ok = bf_console_add("voiceMute", BF_CONSOLE_METHOD, mute_cmd)
-             && bf_console_add("voiceUnmute", BF_CONSOLE_METHOD, mute_cmd);
+    int ok = bf_console_add("voiceChat.mute", BF_CONSOLE_METHOD, mute_cmd)
+             && bf_console_add("voiceChat.unmute", BF_CONSOLE_METHOD, mute_cmd);
     for (i = 0; i < sizeof BUDDY_LOAD_CALLS / sizeof BUDDY_LOAD_CALLS[0]; i++) {
         ok &= bf_redirect_call(BUDDY_LOAD_CALLS[i], BUDDY_LOAD, hk_buddy_load);
     }
@@ -1041,7 +1042,7 @@ void bf_voice_install(void)
     }
     real_sendto = bf_hook_import("WSOCK32.dll", "sendto", hk_sendto);
     if (!real_sendto) {
-        bf_log("voice: the game's sendto is not hooked; set bf1942patch.voiceServer if the game joins without restarting");
+        bf_log("voice: the game's sendto is not hooked; set voiceChat.server if the game joins without restarting");
     }
     /* LANCommander.Voice's BF1942 Interposer plugin stands down while this one runs the voice client */
     snprintf(name, sizeof name, "Local\\bf1942patch_voice_%lu", GetCurrentProcessId());

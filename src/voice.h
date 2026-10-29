@@ -39,7 +39,7 @@ int bf_voice_vk(const char *name);   /* the virtual key that is held for a game 
 extern int bf_voice_volume, bf_voice_mic;
 extern unsigned char bf_voice_va[2];
 
-/* the microphone (bf1942patch.inputDevice): its name as the Controls options show it, and the next one (after the last
+/* the microphone (voiceChat.inputDevice): its name as the Controls options show it, and the next one (after the last
  * one the default), applied at once and kept in the player's bf1942patch.con; on the game thread */
 void bf_voice_mic_text(wchar_t *out, int size);
 void bf_voice_next_mic(void);

@@ -1,4 +1,4 @@
-/* bf1942patch.borderless 1: the game in a borderless window that covers its monitor instead of exclusive full screen.
+/* renderer.borderless 1: the game in a borderless window that covers its monitor instead of exclusive full screen.
  * The desktop resolution never changes, alt-tab is instant, and the restarts the game does for every map (restart.c)
  * no longer switch the display mode back and forth.
  *
@@ -26,7 +26,7 @@ HWND bf_game_window(void)
     return g_window;
 }
 
-/* the monitor of the game window (the primary one before it exists, or bf1942patch.monitor <n>, from 1) */
+/* the monitor of the game window (the primary one before it exists, or renderer.monitor <n>, from 1) */
 void bf_game_monitor(RECT *r)
 {
     MONITORINFO mi;

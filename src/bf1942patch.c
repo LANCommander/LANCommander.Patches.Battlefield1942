@@ -1,8 +1,8 @@
 /* Core of the patch: verifies the exe, reads the options, installs the patch modules.
- * The options are console variables bf1942patch.<name> (settings.h, settings_game.c): read from bf1942patch.con next
- * to the DLL (dinput8.dll proxy and ASI builds; the plugin build adds the Interposer's Config.yml, see
- * interposer_plugin.c), then from the player's bf1942patch.con in the save folder, and set in the console or by the
- * game's .con files. The log goes to bf1942patch.log next to the DLL, or the Interposer's session log. */
+ * The options are console variables (game.maxFps, voiceChat.port, ...; settings.h, settings_game.c): read from
+ * bf1942patch.con next to the DLL (dinput8.dll proxy and ASI builds; the plugin build adds the Interposer's
+ * Config.yml, see interposer_plugin.c), then from the player's bf1942patch.con in the save folder, and set in the
+ * console or by the game's .con files. The log goes to bf1942patch.log next to the DLL, or the Interposer's session log. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -196,7 +196,7 @@ int bf_patch_start(void)
     }
     bf_settings_load(g_server);
     if (!bf_setting_int("enabled")) {
-        bf_log("bf1942patch: disabled (bf1942patch.enabled 0)");
+        bf_log("bf1942patch: disabled (game.patchEnabled 0)");
         return 0;
     }
     {

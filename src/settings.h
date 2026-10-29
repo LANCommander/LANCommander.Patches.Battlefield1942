@@ -1,6 +1,7 @@
-/* The patch's options. Every option is a console variable bf1942patch.<name>: a line "bf1942patch.<name> <value>" in a
- * bf1942patch.con file (read by the patch itself as it loads, before the game runs any code), and a console command of
- * the same name in the game (settings_game.c), so the console and the game's .con files read and set it too.
+/* The patch's options. Every option is a console variable with a name next to the game's own (game.maxFps,
+ * renderer.borderless, voiceChat.port, ...): a line "<console name> <value>" in a bf1942patch.con file (read by the
+ * patch itself as it loads, before the game runs any code), and a console command of the same name in the game
+ * (settings_game.c), so the console and the game's .con files read and set it too.
  * Plain C with no Windows headers: the Linux server build (linux/server_linux.c) compiles it too. */
 #ifndef BF_SETTINGS_H
 #define BF_SETTINGS_H
@@ -16,7 +17,8 @@ enum {
 };
 
 typedef struct {
-    const char *name;                /* bf1942patch.<name> */
+    const char *name;                /* the patch's own: bf_setting_int("maxFps"), Config.yml, BF1942PATCH_<NAME> */
+    const char *console;             /* object.name in the console and the .con files: game.maxFps */
     int type, flags;
     int def;                         /* BF_OPT_INT */
     const char *def_str;             /* BF_OPT_STR */
@@ -28,7 +30,9 @@ typedef struct {
 extern const bf_option bf_options[];
 extern const int bf_n_options;
 
-int bf_option_find(const char *name);                /* its index, -1 if there is no such option */
+int bf_option_find(const char *name);                /* by name or console name: its index, -1 if none */
+/* by console name, or bf1942patch.<name> as earlier builds named them: its index, -1 if none */
+int bf_option_find_console(const char *name);
 int bf_setting_int(const char *name);
 const char *bf_setting_str(const char *name);        /* "" for none; valid until the option is set again */
 int bf_option_int(int i);
@@ -45,7 +49,7 @@ int bf_setting_set_str(const char *name, const char *value);
 /* the value as a .con file writes it: 1, "text" (quoted = 1), or as the console prints it (quoted = 0) */
 void bf_option_text(int i, char *out, int size, int quoted);
 
-/* "bf1942patch.<name> <value>" lines; rem / ; / # / // lines and other commands are skipped. Options flagged
+/* "<console name> <value>" lines; rem / ; / # / // lines and other commands are skipped. Options flagged
  * BF_OPT_INSTALL are skipped in a player's file (user = 1). The options set are marked as the player's (user = 1).
  * The count set, -1 if the file cannot be read. */
 int bf_settings_load_con(const char *path, int user);

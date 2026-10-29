@@ -11,7 +11,7 @@
  *   +0x44 id, +0x58 is AI; +0xa9 alive (bool), +0xac team. IObject vtable +0x34: its position (const float[3] *).
  * - The GameSpy query replies leave through the exe's WSOCK32 sendto (FUN_004444b0): hooked to add \commsport\.
  * - A dedicated server runs unattended, so its error dialogs would hang it for good: MessageBoxA/W are answered OK and
- *   logged (bf1942patch.suppressDialogs 1), and the server then exits as it would after the click. */
+ *   logged (game.suppressDialogs 1), and the server then exits as it would after the click. */
 #include <winsock2.h>
 #include <stdio.h>
 #include <string.h>
@@ -227,7 +227,7 @@ void bf_server_install(void)
     }
     if (!(real_sendto = bf_hook_import("WSOCK32.dll", "sendto", hk_sendto))) {
         bf_log("server: the server's sendto is not hooked, so its queries do not say the voice port or the FastDL "
-               "server; clients need bf1942patch.voicePort and fastDlUrl");
+               "server; clients need voiceChat.port and fastDlUrl");
     }
     if (voice) {
         bf_log("voice server: installed (it starts with the first frame)");

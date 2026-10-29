@@ -1,7 +1,7 @@
 /* The HUD scale in the game's own Options -> General page, as a console command, and in the profile.
  *
  * (re/menu_notes.md)
- * - Console command bf1942patch.hudScale [percent] (also bf1942patch.setHudScale / getHudScale): a console method
+ * - Console command game.hudScale [percent]: a console method
  *   object of our own, laid out like the game's (vtable copied from game.setMinimapTransparency at 0x91fca0, invoke
  *   at +0x40 and isActive at +0x44 replaced), handed to ConsoleObjects::registerList (0x5ac970, registry 0x9ab610)
  *   right after the menu module registers its own commands (its vtable slot 0x8d2148 -> 0x6b4d80, before any .con
@@ -9,7 +9,7 @@
  *   the other modules add methods taking a std::string like game.addPlayerToBuddyListByName (0x418480).
  * - The profile: SaveGeneralOptions (0x6d5a20) rewrites Settings/Profiles/<profile>/GeneralOptions.con from the
  *   page's fields; its last line is written by the call at 0x6d61d4 (FileHandle::write 0x5839f0). That call is
- *   redirected to write "bf1942patch.hudScale <n>" after it, so the value is saved with the profile and runs with
+ *   redirected to write "game.hudScale <n>" after it, so the value is saved with the profile and runs with
  *   it (at start-up and whenever the page loads).
  * - The slider: the page is data (MemeFile 2.0 "menu/GeneralOptionsMenu" in menu.rfa). When the meme stream opener
  *   (0x601e80) hands out that file, the minimap transparency row is cloned in memory into a "HUD SCALE" row
@@ -17,7 +17,7 @@
  *   splice relies on is checked first; any other version of the file is left alone. The variable is bound to the
  *   patch's own int by GeneralOptions::registerVariables (0x6d4d10, vtable slot 0x923968), which runs before the
  *   page loads, through bindInt (0x69eb50). The slider writes the int as it moves, so the HUD follows live.
- * The starting value is bf1942patch.hudScale from bf1942patch.con (default 100); a profile's saved value wins.
+ * The starting value is game.hudScale from bf1942patch.con (default 100); a profile's saved value wins.
  *
  * The other modules add rows to the options pages the same way: bf_menu_add_row (one copied row, framerate.c), and
  * bf_menu_graft (voice_menu.c) for rows copied from another page (opened through the original opener as the donor
@@ -54,7 +54,7 @@ static void set_scale(int pct)
     g_hud_scale = pct;
 }
 
-/* bf1942patch.hudScale <percent>, in the console or the profile's GeneralOptions.con */
+/* game.hudScale <percent>, in the console or the profile's GeneralOptions.con */
 static void hud_scale_changed(void)
 {
     set_scale(g_hud_scale);
@@ -75,6 +75,8 @@ static void hud_scale_changed(void)
 static struct command {
     BYTE obj[0xb0];                  /* the method object (first: the console hands it back as self) */
     bf_console_fn fn;
+    const char *name;                /* object.method */
+    char object[32];                 /* the object's name (the method's is in name) */
 } g_cmds[MAX_COMMANDS];
 static int g_ncmds;
 static void *g_cmd_vtbl[25];
@@ -94,7 +96,7 @@ static void *__attribute__((thiscall)) cmd_invoke(void *self, void *ret, const B
     }
     for (i = 0; i < g_ncmds; i++) {
         if (self == g_cmds[i].obj) {
-            g_cmds[i].fn(*(const char **)(g_cmds[i].obj + 0x0c), argc, args, text, sizeof text);
+            g_cmds[i].fn(g_cmds[i].name, argc, args, text, sizeof text);
         }
     }
     bf_string_init(ret, text);
@@ -146,7 +148,7 @@ static void register_commands(void)
     g_list.size = (DWORD)g_ncmds;
     ((char (__attribute__((thiscall)) *)(void *, void *))BF_ADDR(REGISTER_LIST))(BF_ADDR(REGISTRY), &g_list);
     for (i = 0; i < g_ncmds; i++) {
-        bf_log("menu: console command bf1942patch.%s registered", *(const char **)(g_cmds[i].obj + 0x0c));
+        bf_log("menu: console command %s registered", g_cmds[i].name);
     }
 }
 
@@ -161,16 +163,22 @@ int bf_console_add(const char *name, int kind, bf_console_fn fn)
 {
     static int hooked;
     int property = kind != BF_CONSOLE_METHOD;
+    const char *dot = strchr(name, '.');
+    struct command *cmd = &g_cmds[g_ncmds];
     BYTE *c;
-    if (g_ncmds == MAX_COMMANDS
+    if (g_ncmds == MAX_COMMANDS || !dot || dot - name >= (int)sizeof cmd->object
         || (!hooked && !(hooked = bf_hook_slot(MENU_REGISTER_SLOT, MENU_REGISTER, hk_menu_register)))) {
         return 0;
     }
-    c = g_cmds[g_ncmds].obj;
-    g_cmds[g_ncmds++].fn = fn;
+    g_ncmds++;
+    c = cmd->obj;
+    cmd->fn = fn;
+    cmd->name = name;
+    lstrcpynA(cmd->object, name, (int)(dot - name) + 1);
     *(DWORD *)(c + 0x04) = property ? 1 : 0;            /* a property: no argument reads it */
-    *(const char **)(c + 0x08) = "bf1942patch";
-    *(const char **)(c + 0x0c) = name;
+    *(const char **)(c + 0x08) = cmd->object;           /* the console's key is object.method: an object of the game's
+                                                         * (game, renderer) takes the new method beside its own */
+    *(const char **)(c + 0x0c) = dot + 1;
     *(DWORD *)(c + 0x10) = 3;                           /* typed in the console and run from .con files */
     *(DWORD *)(c + 0x14) = property ? 0 : 1;            /* a method's argument */
     *(DWORD *)(c + 0x18) = 1;
@@ -192,7 +200,7 @@ static int __attribute__((thiscall)) hk_write_last(void *fh, const void *line)
     BYTE s[BF_STRING_SIZE];
     char text[48];
     int r = ((write_fn)BF_ADDR(WRITE_LINE))(fh, line);
-    snprintf(text, sizeof text, "bf1942patch.hudScale %d\n", bf_hud_scale());
+    snprintf(text, sizeof text, "game.hudScale %d\n", bf_hud_scale());
     if (bf_string_init(s, text)) {
         ((write_fn)BF_ADDR(WRITE_LINE))(fh, s);
         bf_string_free(s);
@@ -1124,7 +1132,7 @@ void bf_menu_install(void)
     set_scale(g_hud_scale);
     bf_setting_watch("hudScale", hud_scale_changed);
     if (!bf_setting_int("hudScaleOption")) {
-        bf_log("menu: hudScaleOption 0, no HUD scale slider (the HUD scale is only bf1942patch.hudScale)");
+        bf_log("menu: hudScaleOption 0, no HUD scale slider (the HUD scale is only game.hudScale)");
         return;
     }
     g_on = 1;
@@ -1137,5 +1145,5 @@ void bf_menu_install(void)
     } else {
         bf_log("menu: the options page code differs, no HUD scale slider");
     }
-    bf_log("menu: HUD scale %d%% (Options -> General, bf1942patch.hudScale)", g_hud_scale);
+    bf_log("menu: HUD scale %d%% (Options -> General, game.hudScale)", g_hud_scale);
 }

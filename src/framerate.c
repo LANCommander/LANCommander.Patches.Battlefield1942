@@ -1,4 +1,4 @@
-/* bf1942patch.unlockFps: no 60 / 100 fps cap, and a HUD that keeps time at any frame rate (re/fps_notes.md).
+/* game.unlockFps: no 60 / 100 fps cap, and a HUD that keeps time at any frame rate (re/fps_notes.md).
  *
  * The cap is game.lockFps (app+0x17c, app = [0x971eac]): the main loop step 0x44abc0 busy-waits until 1 / lockFps
  * has passed since the last frame, and the render function 0x466d80 sets lockFps to 60.0 (vsync on) or 100.0 (off)
@@ -16,7 +16,7 @@
  * The Video options page gets a MAX FPS row (maxFpsOption 1): menu/VideoMenu is spliced as it is opened
  * (bf_menu_add_row), the row's int is bound by VideoOptions::registerVariables (0x6b02f0), and SaveVideoOptions
  * (0x6b11a0, on Apply / Back) applies it and keeps it in the player's bf1942patch.con. The
- * console's bf1942patch.maxFps applies at once too. */
+ * console's game.maxFps applies at once too. */
 #include <string.h>
 #include "bf1942patch.h"
 #include "d3d.h"
@@ -123,7 +123,7 @@ __asm__(".text\n"
         "    ret\n");
 void bf_hud_dt_stub(void);
 
-/* ---------------------------------------------------------------- bf1942patch.logFps */
+/* ---------------------------------------------------------------- game.logFps */
 
 static void count_frame(void *device, int after)
 {
@@ -151,7 +151,7 @@ static void count_frame(void *device, int after)
 
 /* ---------------------------------------------------------------- the limit, and the Video page row */
 
-static int g_max_fps;            /* bf1942patch.maxFps; also the menu variable Options/Video/MaxFps */
+static int g_max_fps;            /* game.maxFps; also the menu variable Options/Video/MaxFps */
 static int g_saved_fps;          /* what the player's bf1942patch.con holds */
 
 static int clamp_fps(int fps)
@@ -238,7 +238,7 @@ static void video_option_install(void)
     g_video_save = (void (__attribute__((thiscall)) *)(void *))bf_detour(VIDEO_SAVE, save_head, sizeof save_head, hk_video_save);
 }
 
-/* bf1942patch.maxFps <fps> in the console */
+/* game.maxFps <fps> in the console */
 static void max_fps_changed(void)
 {
     g_max_fps = g_saved_fps = clamp_fps(g_max_fps);

@@ -1,4 +1,4 @@
-/* Voice chat on the HUD (bf1942patch.voiceHud 1): under the minimap, one line per player talking (the local player
+/* Voice chat on the HUD (voiceChat.hud 1): under the minimap, one line per player talking (the local player
  * first, while their voice is sent), in the game's own HUD text and in the colour the game gives that player's team
  * in the chat, with an icon in front: a radio set for the team radio, a soldier with a megaphone for nearby.
  *

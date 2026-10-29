@@ -6,7 +6,7 @@
  * retail exe names master.gamespy.com; the community builds patched in master.bf1942.sk or master.bf1942.org.
  * Every name goes through WSOCK32!gethostbyname (the exe's IAT slot 0x8c3680, also behind the thunk at 0x8050f6),
  * so that one import is hooked:
- *   master.gamespy.com, master.bf1942.sk, master.bf1942.org   -> bf1942patch.masterServer (master.openspy.net)
+ *   master.gamespy.com, master.bf1942.sk, master.bf1942.org   -> game.masterServer (master.openspy.net)
  *   anything else under gamespy.com                           -> the same name under openspy.net
  * OpenSpy speaks the old GameSpy protocols and knows the game (bfield1942), so nothing else changes. */
 #include <stdio.h>

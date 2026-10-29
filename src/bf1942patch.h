@@ -49,7 +49,7 @@ void bf_setting_keep_int(const char *name, int value);
 void bf_setting_keep_str(const char *name, const char *value);
 /* fn applies a value set in the console at once (else it takes effect when the game next starts) */
 void bf_setting_watch(const char *name, void (*fn)(void));
-void bf_settings_console_install(void);   /* every option a console command bf1942patch.<name> */
+void bf_settings_console_install(void);   /* every option a console command (game.maxFps) */
 
 void *bf_hook_import(const char *dll, const char *name, void *replacement);  /* returns the old target */
 void *bf_hook_import_in(HMODULE module, const char *dll, const char *name, void *replacement);
@@ -65,7 +65,7 @@ void bf_make_dirs(const char *path); /* creates every missing parent folder of p
 int bf_cdkey(const char *pack, char *out, int size);
 
 /* patch modules */
-void bf_crashlog_install(void);      /* crashlog.c: bf1942patch.crashLog 1 logs crashes with a call chain */
+void bf_crashlog_install(void);      /* crashlog.c: game.crashLog 1 logs crashes with a call chain */
 void bf_saves_install(void);         /* saves.c: profiles, campaign saves and settings in Saved Games */
 void bf_registry_install(void);      /* registry.c: no registry; the CD keys from a file or the settings */
 void bf_master_install(void);        /* master.c: the server list and server reporting through OpenSpy */
@@ -99,12 +99,12 @@ void bf_wstring_free(void *mem);
 const wchar_t *bf_wstring_chars(const void *s);
 typedef struct { BYTE b[28]; } bf_msvc_string;   /* either, passed by value to the game's functions (callee destroys) */
 
-/* menu.c: the HUD scale in percent (the General options slider, bf1942patch.hudScale) */
+/* menu.c: the HUD scale in percent (the General options slider, game.hudScale) */
 int bf_hud_scale(void);
 void bf_menu_install(void);
 
-/* menu.c: a console command bf1942patch.<name> (typed in the console, run from .con files), added at install. fn gets
- * its name and the arguments (argc 0 for none) and writes what the console prints to out. BF_CONSOLE_INT / _STRING:
+/* menu.c: a console command object.method (typed in the console, run from .con files), added at install. fn gets
+ * that name and the arguments (argc 0 for none) and writes what the console prints to out. BF_CONSOLE_INT / _STRING:
  * a property, <name> [value] reads or sets a value; BF_CONSOLE_METHOD: a method taking a std::string (a quoted
  * argument is one). 0 if it cannot be added. */
 enum { BF_CONSOLE_METHOD, BF_CONSOLE_INT, BF_CONSOLE_STRING };

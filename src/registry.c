@@ -14,11 +14,11 @@
  *   HKLM\Software\Microsoft\Direct3D (0x80a4c0)                                     a D3DX debug switch
  *
  * The CD keys come from, first match wins:
- *   bf1942patch.cdKey / cdKeyXPack1 / cdKeyXPack2 (bf1942patch.con, the console; Interposer: Config.yml)
+ *   game.cdKey / cdKeyXPack1 / cdKeyXPack2 (bf1942patch.con, the console; Interposer: Config.yml)
  *   a file named cdkey (or cdkey.txt) in the save folder, then in the game folder: the key on the first line;
  *        lines XPack1=<key> / XPack2=<key> give the expansions their own keys
  * An expansion without a key of its own gets the main key. Everything the game writes stays in memory for the
- * session (bf1942patch.noRegistry 0 hands the registry back to the game). */
+ * session (game.noRegistry 0 hands the registry back to the game). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -247,7 +247,7 @@ static void install_values(void)
         } else if (packs[i].pack[0] && find_cdkey("", key, sizeof key, &from)) {
             bf_log("registry: %s uses the Battlefield 1942 CD key", packs[i].label);
         } else {
-            bf_log("registry: no %s CD key (put it in a file named cdkey in the game or save folder, or in bf1942patch.cdKey)",
+            bf_log("registry: no %s CD key (put it in a file named cdkey in the game or save folder, or in game.cdKey)",
                    packs[i].label);
             continue;
         }

@@ -3,13 +3,13 @@
  * the game clients (voice.c) find it and talk to whom the game says.
  * - Every player is registered under game id engine id + 1 (the voice API keeps 0 for none); clients log in by
  *   claiming their game player (INTERPOSER_COMMS_AUTH_CLAIM), so voice always matches who is on the game server. Bots
- *   only with bf1942patch.voiceIncludeBots 1 (testing).
+ *   only with voiceChat.includeBots 1 (testing).
  * - The teams are the server groups "Axis" and "Allies": each player sees their own team's only, its team radio.
  * - The live players' positions drive proximity chat 20 times a second; the dead drop out of proximity but keep
  *   the radio.
  * - The voice port is advertised as \commsport\ in the game's GameSpy query replies (the platform's sendto hook calls
  *   bf_server_query_reply), so clients do not need it set.
- * - So is the FastDL server the maps and mods are downloaded from (bf1942patch.fastDlPort, fastDlHost, fastDlPath), as
+ * - So is the FastDL server the maps and mods are downloaded from (game.fastDlPort, fastDlHost, fastDlPath), as
  *   \fastdlport\, \fastdlhost\ and \fastdlpath\: the clients hand it to their Interposer (fastdl.c). That needs no
  *   voice server.
  * Everything but bf_server_query_reply runs on the game thread, from the platform's frame hook. */

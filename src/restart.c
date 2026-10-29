@@ -16,7 +16,7 @@
  *     picture up until the new copy has shown its first frames (signalled through the event named in the
  *     environment variable BF1942PATCH_READY), then hands it the foreground;
  *   - nothing waits on fixed sleeps any more, nothing touches the display mode (with window.c) or the registry.
- * bf1942patch.seamlessRestart 0 turns this off. */
+ * game.seamlessRestart 0 turns this off. */
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -20,9 +20,10 @@
  * The game's 2004 GCC does not keep the 16-byte stack alignment today's GCC assumes, so what the game calls into
  * (main_loop, sendto) realigns the stack.
  *
- * Options: bf1942patch.<option> <value> lines in bf1942patch.con next to this library (or the file BF1942PATCH_CONFIG
- * names), each overridden by an environment variable BF1942PATCH_<OPTION> (BF1942PATCH_VOICEPORT=27800). The log is
- * bf1942patch.log next to the server; bf1942patch.logToStderr 1 copies it to the console. */
+ * Options: <console name> <value> lines (voiceChat.port 27800) in bf1942patch.con next to this library (or the file
+ * BF1942PATCH_CONFIG names), each overridden by an environment variable BF1942PATCH_<OPTION>, by the name settings.c
+ * gives it (BF1942PATCH_VOICEPORT=27800). The log is bf1942patch.log next to the server; game.logToStderr 1 copies it
+ * to the console. */
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dlfcn.h>
@@ -141,7 +142,7 @@ static void load_settings(const char *path)
         if (bf_option_set(i, value) < 0) {
             bf_log("settings: %s=%s is not a number, skipped", env, value);
         } else {
-            bf_log("settings: bf1942patch.%s from %s", bf_options[i].name, env);
+            bf_log("settings: %s from %s", bf_options[i].console, env);
         }
     }
 }
@@ -168,7 +169,7 @@ static const char *self_dir(char *out, size_t size)
     return out;
 }
 
-/* a preloaded Interposer, else bf1942patch.voiceLibrary, else the one next to this library */
+/* a preloaded Interposer, else voiceChat.library, else the one next to this library */
 static void *library(void)
 {
     static int tried;

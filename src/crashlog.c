@@ -1,4 +1,4 @@
-/* bf1942patch.crashLog 1: a crash (access violation and the like) is written to bf1942patch.log with the registers and
+/* game.crashLog 1: a crash (access violation and the like) is written to bf1942patch.log with the registers and
  * a call chain: the stack is scanned for addresses that follow a call instruction in a loaded module. The
  * game's own handler (errorlog.txt) still runs afterwards. */
 #include <stdio.h>

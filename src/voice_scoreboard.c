@@ -1,4 +1,4 @@
-/* Muting players from the scoreboard (bf1942patch.voiceMuteButton 1): a MUTE VOICE button with the game's own player
+/* Muting players from the scoreboard (voiceChat.muteButton 1): a MUTE VOICE button with the game's own player
  * buttons. Pick a player in the scoreboard's list, as for VOTE KICK, and click it to stop hearing them; it reads
  * UNMUTE VOICE for a player who is muted. Mutes are kept by name with the profile, as its buddies are (voice.c).
  * To make room for it ADD BUDDY and DROP BUDDY become one button, ADD BUDDY or DROP BUDDY for the player picked.

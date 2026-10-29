@@ -1,6 +1,6 @@
 /* Widescreen: Hor+ 3D, a HUD that keeps its shape and sits at the screen edges, and a HUD scale (re/hud_notes.md).
  *
- * 3D (bf1942patch.horPlus). The projection (0x5b7fb0) takes a vertical FOV (RenderView+0x24) and the aspect
+ * 3D (renderer.horPlus). The projection (0x5b7fb0) takes a vertical FOV (RenderView+0x24) and the aspect
  * height/width (+0x30), so it is Hor+ as long as the aspect is the real one:
  *   - setAspect (0x5b7d10) of the retail exe replaces any aspect but 0.75 with 0.75 (the stretched 4:3 picture);
  *     the jump at 0x5b7d22 becomes unconditional (some community builds already have it);
@@ -12,7 +12,7 @@
  *     narrower than the vertical one, so wide screens lose patches at their edges (pop-in): they get the real
  *     horizontal FOV.
  *
- * 2D (bf1942patch.widescreenHud). Menus and the HUD are dice::meme trees (menu.rfa) laid out in an 800x600 space centred
+ * 2D (game.widescreenHud). Menus and the HUD are dice::meme trees (menu.rfa) laid out in an 800x600 space centred
  * on 0,0, drawn through an orthographic projection of exactly 800x600 set at the start of every 2D pass (0x6021f0):
  * on a wide screen everything is stretched sideways. That function is replaced: the projection covers W' x H'
  * virtual units, H' = 600 / scale and W' = H' * width / height (or the other way round on screens narrower than
@@ -23,17 +23,17 @@
  * (letterboxed or pillarboxed, like CSS background-size: contain) with black bars around it. In game the same goes for the full-screen overlays (scopes, binoculars,
  * periscope, sub cockpit, artillery view, camera fade).
  *
- * Anchoring (bf1942patch.anchorHud). The layout has no anchors: every box is an offset from its parent's top-left
+ * Anchoring (game.anchorHud). The layout has no anchors: every box is an offset from its parent's top-left
  * corner. While playing (BfMenu+0xfc == 1, no mouse pointer: BfMenu+0x148 == NULL) TransformNode / BfTransformNode
  * draw and event passes (0x7e92b0 / 0x7dab40, 0x7e93d0 / 0x7dac60) are detoured: the first box below the full
  * screen containers is classified by where it sits (across the middle: centre unless much nearer one edge; else
  * starts in the left third and nearer the left edge: left; ends in the right third and nearer the right edge:
  * right; else centre; the same for top / bottom; a few boxes the rule gets wrong are listed), moved by the extra
  * width / height to that edge, and its whole subtree is drawn with it. Menus, the spawn screen and anything with
- * a mouse pointer stay centred (and at scale 1), so clicks on the map keep working. bf1942patch.logHud 1 logs each
+ * a mouse pointer stay centred (and at scale 1), so clicks on the map keep working. game.logHud 1 logs each
  * box and where it went.
  *
- * HUD scale: menu.c (Options -> General, bf1942patch.hudScale). */
+ * HUD scale: menu.c (Options -> General, game.hudScale). */
 #include <math.h>
 #include <string.h>
 #include "bf1942patch.h"

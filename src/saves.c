@@ -27,7 +27,7 @@
 static const char *g_dir;           /* save folder, with trailing backslash */
 static char g_cwd[MAX_PATH];        /* working directory at startup, with trailing backslash */
 static int g_on;
-static int g_log_access;              /* bf1942patch.logFiles 1: every redirected path (2: every file) */
+static int g_log_access;              /* game.logFiles 1: every redirected path (2: every file) */
 static CRITICAL_SECTION g_cs;
 
 /* ---------------------------------------------------------------- path mapping */

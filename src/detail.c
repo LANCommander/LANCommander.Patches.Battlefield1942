@@ -1,4 +1,4 @@
-/* bf1942patch.meshLod / treeLod / terrainLod / terrainDetail: the level of detail of meshes, trees and terrain pushed out for today's machines (re/detail_notes.md).
+/* renderer.meshLod / treeLod / terrainLod / terrainDetail: the level of detail of meshes, trees and terrain pushed out for today's machines (re/detail_notes.md).
  *
  * Only what decides how finely the things inside the view are drawn changes. The view distance and the fog
  * (game.setViewDistance, renderer.fogStart / fogEnd), the distance at which small objects are culled and every

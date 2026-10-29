@@ -1,4 +1,4 @@
-/* bf1942patch.fastDl: the maps the game lacks, downloaded from the game server's FastDL server as the game joins it,
+/* game.fastDl: the maps the game lacks, downloaded from the game server's FastDL server as the game joins it,
  * by the LANCommander Interposer's FastDL.
  *
  * - The game server (running this patch, voice_server.c) says where its FastDL server is in its GameSpy query
@@ -8,9 +8,9 @@
  *   manager [0x9a2380] vtable +0x10) before it loads the map, or before it restarts itself for the server's mod. The
  *   browser, +joinServer and the console all join that way. The handler's std::string at +0x22c is the server
  *   ("ip:port", what +joinServer gets). Before that look, this module asks the server's query ports
- *   (bf1942patch.voiceQueryPorts) for its FastDL server and hands the URL to the Interposer
+ *   (game.queryPorts) for its FastDL server and hands the URL to the Interposer
  *   (InterposerSetFastDLBaseUrl); the Interposer's file hooks then fetch an archive the game does not have. The
- *   server's FastDL server always wins: over bf1942patch.fastDlUrl (used only when the server names none) and over
+ *   server's FastDL server always wins: over game.fastDlUrl (used only when the server names none) and over
  *   the Interposer's own FastDL.BaseUrl.
  * - The Interposer's Config.yml decides the rest (FastDL.Enabled, FastDL.Paths). For the Interposer embedded in the
  *   dinput8.dll / ASI builds, .interposer\Config.yml next to the patch, a Config.yml with FastDL on for the .rfa
@@ -122,10 +122,10 @@ void bf_fastdl_join(void *handler)
             bf_log("fastdl: the game server %s has no FastDL server", address);
         }
     }
-    /* else bf1942patch.fastDlUrl, if set */
+    /* else game.fastDlUrl, if set */
     if (!url[0] && bf_setting_str("fastDlUrl")[0]) {
         lstrcpynA(url, bf_setting_str("fastDlUrl"), sizeof url);
-        bf_log("fastdl: using bf1942patch.fastDlUrl instead");
+        bf_log("fastdl: using game.fastDlUrl instead");
     }
     if (!MultiByteToWideChar(CP_UTF8, 0, url, -1, wide, sizeof wide / sizeof wide[0])) {
         wide[0] = L'\0';

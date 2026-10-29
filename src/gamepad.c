@@ -51,7 +51,7 @@ static const GUID PAD_PRODUCT = { 0x42463432, 0x5041, 0x4401, { 0x80, 0x00, 0x42
 
 static int g_on;
 static int g_deadzone = 15;
-static float g_curve = 1.0f;          /* stick response exponent, from bf1942patch.gamepadSensitivity */
+static float g_curve = 1.0f;          /* stick response exponent, from game.gamepadSensitivity */
 static int g_hide_twins = 1;
 static int g_nslots;                  /* slots offered: the gamepads at start-up */
 static int g_start_key = 0x01;        /* DIK_ESCAPE: the in-game menu */

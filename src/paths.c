@@ -1,7 +1,7 @@
 /* The install folder and the user's save folder.
  *
  * Save folder: <Saved Games>\DICE\Battlefield 1942 (SHGetKnownFolderPath(FOLDERID_SavedGames), which is
- * %USERPROFILE%\Saved Games unless the user moved it). bf1942patch.saveFolder overrides it; redirectSaves 0 turns
+ * %USERPROFILE%\Saved Games unless the user moved it). game.saveFolder overrides it; redirectSaves 0 turns
  * the redirection off (bf_save_dir() is then ""). Both come from the install's bf1942patch.con only: the player's
  * bf1942patch.con (settings_game.c), which can override every other option, lives in the folder they choose. */
 #include <stdio.h>
