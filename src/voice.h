@@ -85,4 +85,14 @@ void bf_voice_hud_update(const bf_voice_state *s);   /* every frame, on the game
 void bf_voice_menu_install(void);
 void bf_voice_menu_tick(void);
 void bf_voice_scoreboard_install(void);
+
+/* ---------------------------------------------------------------- voice_lips.c */
+
+typedef struct {
+    int id;                          /* the game's player id */
+    float level_db;                  /* the voice's level, dBFS */
+} bf_voice_mouth;
+
+void bf_voice_lips_install(void);
+void bf_voice_lips_update(const bf_voice_mouth *talkers, int n);   /* every frame, on the game thread */
 #endif

@@ -13,7 +13,8 @@
  *   their own team's group only, which becomes the radio's target;
  * - keeps what the HUD shows up to date (voice_hud.c), and applies the keys and volumes of the menus
  *   (voice_menu.c);
- * - mutes the players muted from the scoreboard (voice_scoreboard.c), by name, whenever they are in voice.
+ * - mutes the players muted from the scoreboard (voice_scoreboard.c), by name, whenever they are in voice;
+ * - moves the mouths of the soldiers talking with their voice (voice_lips.c).
  * Everything runs on the game thread, after each step of the main loop (0x44abc0, detoured; before each Present if
  * another plugin hooked it first). The voice client of LANCommander.Voice's BF1942 Interposer plugin stands down
  * while this one runs (the mutex Local\bf1942patch_voice_<pid>). The local player:
@@ -891,14 +892,16 @@ static void update_state(void)
 {
     interposer_comms_speaker_info speakers[BF_VOICE_MAX_TALKERS];
     interposer_comms_transmit_state tx;
+    bf_voice_mouth mouths[BF_VOICE_MAX_TALKERS + 1];
     uint32_t n = 0, i;
-    int id;
+    int id = -1, n_mouths = 0;
     bf_voice_state *s = &g_state;
     s->connected = p_comms_client_get_state(g_client) == INTERPOSER_COMMS_STATE_CONNECTED;
     s->n = 0;
     s->talking = s->radio = 0;
     if (s->connected && !local_player(s->me, sizeof s->me, &id, &s->my_team)) {
         s->me[0] = 0;
+        id = -1;
     }
     if (s->connected && p_comms_client_get_transmit_state(g_client, &tx) == INTERPOSER_COMMS_OK) {
         s->talking = tx.transmitting;
@@ -912,6 +915,10 @@ static void update_state(void)
             g_radio_tail = bf_voice_va[1] && !bf_voice_va[0];
         }
         s->radio = g_radio_tail;
+        if (s->talking && id >= 0) {
+            mouths[n_mouths].id = id;
+            mouths[n_mouths++].level_db = tx.input_level_db;
+        }
     }
     if (s->connected
         && p_comms_client_get_active_speakers(g_client, speakers, BF_VOICE_MAX_TALKERS, &n) == INTERPOSER_COMMS_OK) {
@@ -926,9 +933,14 @@ static void update_state(void)
             t->team = info.game_player_id ? team_of((int)info.game_player_id - 1) : 0;   /* the bridge's ids are engine id + 1 */
             t->radio = speakers[i].kind == INTERPOSER_COMMS_TARGET_GROUP;
             s->n++;
+            if (info.game_player_id) {
+                mouths[n_mouths].id = (int)info.game_player_id - 1;
+                mouths[n_mouths++].level_db = speakers[i].level_db;
+            }
         }
     }
     bf_voice_hud_update(s);
+    bf_voice_lips_update(mouths, n_mouths);
 }
 
 /* the sliders of the Sound options: applied as they move, saved once they stop */
@@ -1126,4 +1138,5 @@ void bf_voice_install(void)
     bf_voice_hud_install();
     bf_voice_menu_install();
     bf_voice_scoreboard_install();
+    bf_voice_lips_install();
 }
