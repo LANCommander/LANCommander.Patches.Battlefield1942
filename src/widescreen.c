@@ -24,14 +24,15 @@
  * periscope, sub cockpit, artillery view, camera fade).
  *
  * Anchoring (game.anchorHud). The layout has no anchors: every box is an offset from its parent's top-left
- * corner. While playing (BfMenu+0xfc == 1, no mouse pointer: BfMenu+0x148 == NULL) TransformNode / BfTransformNode
- * draw and event passes (0x7e92b0 / 0x7dab40, 0x7e93d0 / 0x7dac60) are detoured: the first box below the full
+ * corner. While playing (BfMenu+0xfc == 1, no mouse pointer: BfMenu+0x148 == NULL, no scoreboard) TransformNode /
+ * BfTransformNode draw and event passes (0x7e92b0 / 0x7dab40, 0x7e93d0 / 0x7dac60) are detoured: the first box below the full
  * screen containers is classified by where it sits (across the middle: centre unless much nearer one edge; else
  * starts in the left third and nearer the left edge: left; ends in the right third and nearer the right edge:
  * right; else centre; the same for top / bottom; a few boxes the rule gets wrong are listed), moved by the extra
  * width / height to that edge, and its whole subtree is drawn with it. Menus, the spawn screen and anything with
- * a mouse pointer stay centred (and at scale 1), so clicks on the map keep working. game.logHud 1 logs each
- * box and where it went.
+ * a mouse pointer stay centred (and at scale 1), so clicks on the map keep working. So does the scoreboard, also
+ * before it gets the pointer (right mouse button): its two halves (10,60 and 409,60, 512x512) would go to opposite
+ * edges, and it would jump back when the pointer shows. game.logHud 1 logs each box and where it went.
  *
  * HUD scale: menu.c (Options -> General, game.hudScale). */
 #include <math.h>
@@ -160,6 +161,9 @@ static void on_device(void *device, const bf_present_params *pp, int reset)
 #define BFMENU_MODE    0xfc           /* 0 main menu, 1 in game, 3 loading */
 #define BFMENU_POINTER 0x148          /* the mouse pointer, NULL while hidden */
 #define MODE_INGAME 1
+#define GAME_UI     0xa5f1a8u         /* its scoreboard at +0x3c, shown while that one's +0x3c is set (0x6a97f0) */
+#define UI_SCOREBOARD 0x3c
+#define SB_SHOWN      0x3c
 
 typedef void (__attribute__((thiscall)) *set_int_fn)(void *, int);
 typedef void (__attribute__((thiscall)) *set_float_fn)(void *, float);
@@ -175,11 +179,17 @@ static int ingame(const BYTE *menu)
     return *(const int *)(menu + BFMENU_MODE) == MODE_INGAME;
 }
 
-/* playing, with no mouse pointer on the screen */
+static int scoreboard_shown(void)
+{
+    BYTE *ui = *(BYTE **)BF_ADDR(GAME_UI), *sb;
+    return ui && (sb = *(BYTE **)(ui + UI_SCOREBOARD)) && sb[SB_SHOWN];
+}
+
+/* playing, with no mouse pointer or scoreboard on the screen */
 static int playing(void)
 {
     BYTE *menu = bfmenu();
-    return menu && ingame(menu) && !*(void **)(menu + BFMENU_POINTER);
+    return menu && ingame(menu) && !*(void **)(menu + BFMENU_POINTER) && !scoreboard_shown();
 }
 
 static void __attribute__((thiscall)) hk_ortho(BYTE *sys)
