@@ -158,15 +158,18 @@ voiceChat.server ""
 rem the game server's query ports, asked for its voice port and FastDL server (LAN, internet)
 game.queryPorts "22000,23000"
 rem 1 = talk to the players nearby whenever the microphone hears speech, without holding a key (voice activation);
-rem 0 = push to talk with voiceChat.proximityKey. Also a check box in Options - Controls - Common
+rem 0 = push to talk with voiceChat.proximityKey. Also VOICE INPUT MODE in Options - Sound (page 2)
 voiceChat.voiceActivation 0
-rem the same for the team radio
+rem the same for the team radio (VOICE INPUT MODE turns it off with PUSH TO TALK)
 voiceChat.radioActivation 0
-rem the push-to-talk keys, as the game names them (Options - Controls - Common gets rows for both): IDKey_A..IDKey_Z,
-rem IDKey_0..IDKey_9, IDKey_F1..IDKey_F12, IDKey_Capital, IDKey_LeftAlt, IDKey_Tab, IDKey_Space, IDKey_Numpad0, ...,
-rem Mouse_IDButton_0..Mouse_IDButton_4 (the mouse buttons from the left one); none = no key
+rem the push-to-talk keys, a primary and an alternate one each (either talks), as the game names them (Options -
+rem Controls - Common gets rows for both): IDKey_A..IDKey_Z, IDKey_0..IDKey_9, IDKey_F1..IDKey_F12, IDKey_Capital,
+rem IDKey_LeftAlt, IDKey_Tab, IDKey_Space, IDKey_Numpad0, ..., Mouse_IDButton_0..Mouse_IDButton_4 (the mouse buttons
+rem from the left one); none = no key
 voiceChat.proximityKey IDKey_Capital
+voiceChat.proximityKeyAlternate none
 voiceChat.radioKey Mouse_IDButton_3
+voiceChat.radioKeyAlternate none
 rem the volume of the other players and the microphone's sensitivity, in percent (0-200). Options - Sound (page 2)
 rem gets a slider for each
 voiceChat.volume 100

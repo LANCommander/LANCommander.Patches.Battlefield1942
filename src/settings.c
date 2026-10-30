@@ -69,6 +69,8 @@ const bf_option bf_options[] = {
     I("radioActivation", "voiceChat.radioActivation", 0, 0, "Voice", "RadioActivation"),
     S("proximityKey", "voiceChat.proximityKey", 0, "IDKey_Capital", "Voice", "ProximityKey"),
     S("radioKey", "voiceChat.radioKey", 0, "Mouse_IDButton_3", "Voice", "RadioKey"),
+    S("proximityKeyAlternate", "voiceChat.proximityKeyAlternate", 0, "none", "Voice", "ProximityKeyAlternate"),
+    S("radioKeyAlternate", "voiceChat.radioKeyAlternate", 0, "none", "Voice", "RadioKeyAlternate"),
     I("voiceVolume", "voiceChat.volume", 0, 100, "Voice", "VoiceVolume"),
     I("micSensitivity", "voiceChat.micSensitivity", 0, 100, "Voice", "MicSensitivity"),
     S("inputDevice", "voiceChat.inputDevice", 0, "", "Voice", "InputDevice"),

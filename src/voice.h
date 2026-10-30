@@ -28,18 +28,19 @@ const bf_voice_state *bf_voice_now(void);
 /* the Interposer with the voice API (the plugin build's host, else the one built into the patch); NULL without one */
 HMODULE bf_voice_library(void);
 
-/* the push-to-talk keys, as the game names them (IDKey_Capital, Mouse_IDButton_3) */
+/* the push-to-talk keys, as the game names them (IDKey_Capital, Mouse_IDButton_3): a primary and an alternate one
+ * (alt 1) for each */
 enum { BF_VOICE_NEARBY, BF_VOICE_RADIO };
-const char *bf_voice_key(int which);
-void bf_voice_set_key(int which, const char *name);   /* "" = none; kept in the player's bf1942patch.con */
+const char *bf_voice_key(int which, int alt);
+void bf_voice_set_key(int which, int alt, const char *name);   /* "" = none; kept in the player's bf1942patch.con */
 int bf_voice_vk(const char *name);   /* the virtual key that is held for a game key name, 0 if there is none */
 
-/* the Sound options sliders, in percent, and the Controls options' voice activation check boxes (nearby, radio):
+/* the Sound options sliders, in percent, and voice activation (nearby, radio; the Sound options' VOICE INPUT MODE):
  * bound to the menus, read every frame */
 extern int bf_voice_volume, bf_voice_mic;
 extern unsigned char bf_voice_va[2];
 
-/* the microphone (voiceChat.inputDevice): its name as the Controls options show it, and the next one (after the last
+/* the microphone (voiceChat.inputDevice): its name as the Sound options show it, and the next one (after the last
  * one the default), applied at once and kept in the player's bf1942patch.con; on the game thread */
 void bf_voice_mic_text(wchar_t *out, int size);
 void bf_voice_next_mic(void);

@@ -7,8 +7,8 @@
  * advertises that server's port in its query replies (voice_net.c). This client:
  * - finds the server the game plays on and connects to its voice server as the local player (the server knows
  *   the game's players and only lets each be claimed by its own name / id: the bridge's ids are engine id + 1);
- * - talks to the players nearby while the proximity key is held (or always while the microphone hears speech,
- *   with voiceChat.voiceActivation 1), and on the team radio while the radio key is held: the server shows each player
+ * - talks to the players nearby while a proximity key is held (or always while the microphone hears speech,
+ *   with voiceChat.voiceActivation 1), and on the team radio while a radio key is held: the server shows each player
  *   their own team's group only, which becomes the radio's target;
  * - keeps what the HUD shows up to date (voice_hud.c), and applies the keys and volumes of the menus
  *   (voice_menu.c);
@@ -198,37 +198,48 @@ int bf_voice_vk(const char *name)
     return 0;
 }
 
-static char g_keys[2][48];
-static int g_vk[2];
+static char g_keys[2][2][48];        /* [nearby, radio][primary, alternate] */
+static int g_vk[2][2];
+static const char *const KEY_OPTIONS[2][2] = {{"proximityKey", "proximityKeyAlternate"},
+                                              {"radioKey", "radioKeyAlternate"}};
 
-const char *bf_voice_key(int which)
+const char *bf_voice_key(int which, int alt)
 {
-    return g_keys[which];
+    return g_keys[which][alt];
 }
 
-void bf_voice_set_key(int which, const char *name)
+void bf_voice_set_key(int which, int alt, const char *name)
 {
-    lstrcpynA(g_keys[which], name, sizeof g_keys[0]);
-    g_vk[which] = name[0] ? bf_voice_vk(name) : 0;
-    bf_setting_keep_str(which == BF_VOICE_RADIO ? "radioKey" : "proximityKey", name[0] ? name : "none");
-    bf_log("voice: %s key %s", which == BF_VOICE_RADIO ? "radio" : "proximity", name[0] ? name : "none");
+    lstrcpynA(g_keys[which][alt], name, sizeof g_keys[0][0]);
+    g_vk[which][alt] = name[0] ? bf_voice_vk(name) : 0;
+    bf_setting_keep_str(KEY_OPTIONS[which][alt], name[0] ? name : "none");
+    bf_log("voice: %s key%s %s", which == BF_VOICE_RADIO ? "radio" : "proximity", alt ? " (alternate)" : "",
+           name[0] ? name : "none");
 }
 
 /* a key option: empty = the default, "none" = no key */
-static void load_key(int which, const char *name)
+static void load_key(int which, int alt)
 {
-    lstrcpynA(g_keys[which], bf_setting_str(name), sizeof g_keys[0]);
-    if (!g_keys[which][0]) {
-        lstrcpynA(g_keys[which], bf_options[bf_option_find(name)].def_str, sizeof g_keys[0]);
+    const char *name = KEY_OPTIONS[which][alt];
+    char *key = g_keys[which][alt];
+    lstrcpynA(key, bf_setting_str(name), sizeof g_keys[0][0]);
+    if (!key[0]) {
+        lstrcpynA(key, bf_options[bf_option_find(name)].def_str, sizeof g_keys[0][0]);
     }
-    if (!_stricmp(g_keys[which], "none")) {
-        g_keys[which][0] = '\0';
+    if (!_stricmp(key, "none")) {
+        key[0] = '\0';
     }
-    g_vk[which] = g_keys[which][0] ? bf_voice_vk(g_keys[which]) : 0;
-    if (g_keys[which][0] && !g_vk[which]) {
-        bf_log("voice: %s %s is not a keyboard key or mouse button", bf_options[bf_option_find(name)].console,
-               g_keys[which]);
+    g_vk[which][alt] = key[0] ? bf_voice_vk(key) : 0;
+    if (key[0] && !g_vk[which][alt]) {
+        bf_log("voice: %s %s is not a keyboard key or mouse button", bf_options[bf_option_find(name)].console, key);
     }
+}
+
+/* either key of which is held */
+static int key_held(int which)
+{
+    return (g_vk[which][0] && (GetAsyncKeyState(g_vk[which][0]) & 0x8000))
+           || (g_vk[which][1] && (GetAsyncKeyState(g_vk[which][1]) & 0x8000));
 }
 
 /* ---------------------------------------------------------------- the local player */
@@ -339,7 +350,7 @@ const bf_voice_state *bf_voice_now(void)
 
 /* ---------------------------------------------------------------- the microphone */
 
-/* voiceChat.inputDevice: the capture device's id as the library lists it, "" = the system's default. The Controls
+/* voiceChat.inputDevice: the capture device's id as the library lists it, "" = the system's default. The Sound
  * options' MICROPHONE row (voice_menu.c) steps through the default and every device listed at the time */
 #define MAX_MICS        32
 static char g_mic[256];
@@ -370,7 +381,7 @@ static int mic_index(uint32_t n)
 
 void bf_voice_mic_text(wchar_t *out, int size)
 {
-    const int max = 30;              /* what the row's box holds */
+    const int max = 28;              /* what the row's box holds */
     int i = mic_index(list_mics()), n;
     if (i < 0 || !MultiByteToWideChar(CP_UTF8, 0, g_mics[i].name, -1, out, size)) {
         lstrcpynW(out, L"DEFAULT", size);
@@ -415,10 +426,11 @@ static int create(void)
     }
     p_comms_client_set_talk_targets(g_client, &nearby, 1);
     p_comms_client_set_ptt_targets(g_client, SLOT_NEARBY, &nearby, 1);
-    bf_log("voice: ready (nearby %s, radio %s; proximity key %s, radio key %s%s%s)",
+    bf_log("voice: ready (nearby %s, radio %s; proximity keys %s / %s, radio keys %s / %s%s%s)",
            bf_voice_va[0] ? "voice activation" : "push to talk", bf_voice_va[1] ? "voice activation" : "push to talk",
-           g_keys[0][0] ? g_keys[0] : "none", g_keys[1][0] ? g_keys[1] : "none", g_join_host[0] ? ", joining " : "",
-           g_join_host);
+           g_keys[0][0][0] ? g_keys[0][0] : "none", g_keys[0][1][0] ? g_keys[0][1] : "none",
+           g_keys[1][0][0] ? g_keys[1][0] : "none", g_keys[1][1][0] ? g_keys[1][1] : "none",
+           g_join_host[0] ? ", joining " : "", g_join_host);
     return 1;
 }
 
@@ -505,8 +517,8 @@ static void update_keys(void)
 {
     int focus = game_has_focus(), i;
     int held[2];
-    held[0] = focus && g_vk[0] && (GetAsyncKeyState(g_vk[0]) & 0x8000);
-    held[1] = focus && g_vk[1] && g_team && (GetAsyncKeyState(g_vk[1]) & 0x8000);
+    held[0] = focus && key_held(0);
+    held[1] = focus && g_team && key_held(1);
     for (i = 0; i < 2; i++) {
         if (held[i] != g_held[i]) {
             g_held[i] = held[i];
@@ -885,7 +897,7 @@ static void update_volumes(ULONGLONG now)
     }
 }
 
-/* the voice activation check boxes: voice activation sends to the default targets (nearby, the team or both) whenever
+/* voice activation (nearby: the Sound options' VOICE INPUT MODE; the radio's only in the settings): voice activation sends to the default targets (nearby, the team or both) whenever
  * the microphone hears speech; the keys still send to their own targets. Applied at once, kept in the player's bf1942patch.con */
 static void update_activation(void)
 {
@@ -955,8 +967,12 @@ static void activation_changed(void)
 
 static void keys_changed(void)
 {
-    load_key(BF_VOICE_NEARBY, "proximityKey");
-    load_key(BF_VOICE_RADIO, "radioKey");
+    int which, alt;
+    for (which = 0; which < 2; which++) {
+        for (alt = 0; alt < 2; alt++) {
+            load_key(which, alt);
+        }
+    }
 }
 
 static void mic_changed(void)
@@ -1030,6 +1046,8 @@ void bf_voice_install(void)
     bf_setting_watch("micSensitivity", volumes_changed);
     bf_setting_watch("proximityKey", keys_changed);
     bf_setting_watch("radioKey", keys_changed);
+    bf_setting_watch("proximityKeyAlternate", keys_changed);
+    bf_setting_watch("radioKeyAlternate", keys_changed);
     bf_setting_watch("inputDevice", mic_changed);
     install_mutes();
     bf_voice_join_server(GetCommandLineA(), g_join_host, sizeof g_join_host, &g_join_port);
