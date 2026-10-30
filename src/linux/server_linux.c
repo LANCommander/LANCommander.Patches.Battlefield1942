@@ -12,7 +12,8 @@
  *   the head node (MSVC: +4). The Itanium ABI gives the interfaces two destructor slots, so IPlayer and IObject
  *   methods sit 4 bytes later than on Windows; `this` is the first stack argument; a std::string is one pointer to
  *   the characters. IPlayer: +0x1c name, +0x3c the soldier or vehicle, +0x48 id, +0x5c is AI; BFPlayer +0x79 alive,
- *   +0x7c team. IObject +0x38: getAbsolutePosition.
+ *   +0x7c team. IObject +0x40: getAbsoluteTransformation
+ *   (row major: the right, up and forward axes, then the position).
  * - The query replies go out through glibc's sendto, which this library interposes (it is the only symbol it
  *   exports).
  * - Engine state can go away under a read (between rounds, a player leaving): reads run under a SIGSEGV / SIGBUS
@@ -70,7 +71,7 @@ static const game_version VERSIONS[] = {
 #define PLAYER_IS_AI    0x5c
 #define PLAYER_ALIVE    0x79
 #define PLAYER_TEAM     0x7c
-#define OBJECT_POSITION 0x38
+#define OBJECT_TRANSFORM 0x40
 #define MAX_WALK        512
 
 static const game_version *g_version;
@@ -265,7 +266,7 @@ static void read_player(void *player, bf_server_player *out)
     const unsigned char *b = player;
     const char *const *name;
     void *vehicle;
-    const float *at;
+    const float *m;
     memset(out, 0, sizeof *out);
     out->id = (int)(intptr_t)vcall(player, PLAYER_ID);
     name = vcall(player, PLAYER_NAME);
@@ -275,8 +276,9 @@ static void read_player(void *player, bf_server_player *out)
     memcpy(&out->team, b + PLAYER_TEAM, sizeof out->team);
     out->alive = b[PLAYER_ALIVE] != 0;
     out->ai = vcall_bool(player, PLAYER_IS_AI) != 0;
-    if ((vehicle = vcall(player, PLAYER_VEHICLE)) != NULL && (at = vcall(vehicle, OBJECT_POSITION)) != NULL) {
-        memcpy(out->position, at, sizeof out->position);
+    if ((vehicle = vcall(player, PLAYER_VEHICLE)) != NULL && (m = vcall(vehicle, OBJECT_TRANSFORM)) != NULL) {
+        memcpy(out->forward, m + 8, sizeof out->forward);
+        memcpy(out->position, m + 12, sizeof out->position);
         out->has_position = 1;
     }
 }

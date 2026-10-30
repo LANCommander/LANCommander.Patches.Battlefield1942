@@ -211,11 +211,15 @@ static void sync_players(uint64_t now)
         }
         positioned = p->alive && p->has_position;
         if (positioned) {
-            interposer_comms_vec3 at;
+            interposer_comms_vec3 at, forward;
             at.x = p->position[0];
             at.y = p->position[1];
             at.z = p->position[2];
-            p_server_update_player_position(g_server, g_players[p->id].voice, 0, at, NULL);
+            forward.x = p->forward[0];
+            forward.y = p->forward[1];
+            forward.z = p->forward[2];
+            /* the facing is what the voice server pans by: without it everyone is heard dead centre */
+            p_server_update_player_position(g_server, g_players[p->id].voice, 0, at, &forward);
         } else if (g_players[p->id].positioned) {
             p_server_clear_player_position(g_server, g_players[p->id].voice);
         }

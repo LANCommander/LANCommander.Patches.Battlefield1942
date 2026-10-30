@@ -14,6 +14,7 @@ typedef struct {
     int alive;
     int has_position;
     float position[3];               /* world space, metres; Y up, left-handed */
+    float forward[3];                /* where it faces (world space), for the stereo pan */
 } bf_server_player;
 
 /* ---------------------------------------------------------------- the platform's (voice_server_win.c, server_linux.c) */

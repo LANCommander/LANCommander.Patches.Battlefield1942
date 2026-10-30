@@ -8,7 +8,8 @@
  *   between engine updates. It returns 0 when the server quits, and the voice server stops then.
  * - IPlayerManager [0x74c534], vtable +0x2c: std::list<IPlayer *> * of every player (bots too), its head node at +4,
  *   nodes {next, prev, value}. IPlayer: vtable +0x18 name (std::string *), +0x38 the soldier or vehicle controlled,
- *   +0x44 id, +0x58 is AI; +0xa9 alive (bool), +0xac team. IObject vtable +0x34: its position (const float[3] *).
+ *   +0x44 id, +0x58 is AI; +0xa9 alive (bool), +0xac team. IObject vtable +0x44: its absolute
+ *   transformation (const float[16] *, row major: the right, up and forward axes, then the position).
  * - The GameSpy query replies leave through the exe's WSOCK32 sendto (FUN_004444b0): hooked to add \commsport\.
  * - A dedicated server runs unattended, so its error dialogs would hang it for good: MessageBoxA/W are answered OK and
  *   logged (game.suppressDialogs 1), and the server then exits as it would after the click. */
@@ -30,7 +31,7 @@
 #define PLAYER_IS_AI    0x58
 #define PLAYER_ALIVE    0xa9
 #define PLAYER_TEAM     0xac
-#define OBJECT_POSITION 0x34
+#define OBJECT_TRANSFORM 0x44
 #define MAX_WALK        512
 
 static uintptr_t g_image_end;
@@ -84,7 +85,7 @@ static int read_player(void *player, bf_server_player *out)
 {
     const BYTE *b = player;
     const void *name, *vehicle;
-    const float *at;
+    const float *m;
     if (!object(player) || !readable(b + PLAYER_TEAM, 4)) {
         return 0;
     }
@@ -98,8 +99,9 @@ static int read_player(void *player, bf_server_player *out)
     out->alive = b[PLAYER_ALIVE] != 0;
     out->ai = (BYTE)(uintptr_t)vcall(player, PLAYER_IS_AI) != 0;
     vehicle = vcall(player, PLAYER_VEHICLE);
-    if (object(vehicle) && readable(at = vcall((void *)vehicle, OBJECT_POSITION), 12)) {
-        memcpy(out->position, at, 12);
+    if (object(vehicle) && readable(m = vcall((void *)vehicle, OBJECT_TRANSFORM), 64)) {
+        memcpy(out->forward, m + 8, 12);
+        memcpy(out->position, m + 12, 12);
         out->has_position = 1;
     }
     return 1;
