@@ -157,6 +157,15 @@ static void present_params(bf_present_params *pp, int reset)
 #define RENDERER_MODES 0xa8           /* renderer: the accepted modes, and their count */
 #define RENDERER_NMODES 0xac
 
+/* The system keys. In full screen (app+0x38, which the borderless window keeps set) the game locks the player in:
+ *   - 0x443ff0 (thiscall(app, bool), on entering / leaving a round) installs a WH_KEYBOARD_LL hook (0x443f80) that
+ *     swallows Alt+Tab, Alt+Esc, the Windows keys, and Esc while Ctrl is down (so a crouching player's Esc never
+ *     reaches the in-game menu). At 0x44408b: jnz past SetWindowsHookExA when a hook is already up; made a jmp;
+ *   - the keyboard (0x66f5f0) is set to DISCL_NOWINKEY (0x15 exclusive, 0x16 not): the flag is dropped. */
+#define KBHOOK_SKIP    0x44408bu
+#define KB_COOP_EXCL   0x66f606u      /* push 0x15 */
+#define KB_COOP_SHARED 0x66f620u      /* push 0x16 */
+
 typedef int (__attribute__((thiscall)) *mode_fn)(void *renderer, int *mode);
 
 static int g_native_menus;
@@ -256,9 +265,15 @@ void bf_window_install(void)
          * unconditional, with 1 (Direct3D stays windowed through present_params) */
         static const BYTE orig[10] = {0x74, 0x08, 0xc7, 0x44, 0x24, 0x04, 0x00, 0x00, 0x00, 0x00};
         static const BYTE full[10] = {0x90, 0x90, 0xc7, 0x44, 0x24, 0x04, 0x01, 0x00, 0x00, 0x00};
+        static const BYTE hook_jnz[2] = {0x75, 0x34}, hook_jmp[2] = {0xeb, 0x34};
+        static const BYTE excl[1] = {0x15}, excl_win[1] = {0x05}, shared[1] = {0x16}, shared_win[1] = {0x06};
         bf_redirect_call(MODE_ACCEPT, MODE_ACCEPT_FN, (void *)hk_mode_accept);
         bf_patch(FULLSCREEN_FORCE, orig, full, sizeof orig);
         g_native_menus = bf_setting_int("nativeMenus");
+        if (!bf_patch(KBHOOK_SKIP, hook_jnz, hook_jmp, sizeof hook_jnz)
+            || !bf_patch(KB_COOP_EXCL, excl, excl_win, 1) || !bf_patch(KB_COOP_SHARED, shared, shared_win, 1)) {
+            bf_log("window: the keyboard code differs, alt-tab and the Windows keys may stay blocked");
+        }
     }
     if (!g_borderless) {
         bf_log("window: borderless 0, the game picks full screen or window itself");
